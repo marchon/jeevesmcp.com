@@ -78,6 +78,58 @@ def cmd_status(args):
     print()
 
 
+def cmd_list(args):
+    """List everything - quick overview of Jeeves state"""
+    config = JeevesConfig()
+    
+    print("\n" + "="*60)
+    print("  🎩 Jeeves Overview")
+    print("="*60)
+    
+    # Platform
+    try:
+        from platform_utils import PlatformInfo
+        platform_info = PlatformInfo()
+        print(f"\n💻 Platform: {platform_info.get_os_display_name()}")
+        print(f"   Shell: {platform_info.shell.value}")
+    except ImportError:
+        pass
+    
+    # Ollama Status
+    print(f"\n🤖 Ollama:")
+    print(f"   Installed: {'✅' if config.is_ollama_installed() else '❌'}")
+    print(f"   Running:   {'✅' if config.is_ollama_running() else '❌'}")
+    
+    # Models
+    installed = config.get_installed_models()
+    print(f"\n📦 Models ({len(installed)} installed):")
+    default = config.config['jeeves']['default_model']
+    for model in installed[:5]:  # Show first 5
+        marker = "⭐" if model == default else "  "
+        print(f"   {marker} {model}")
+    if len(installed) > 5:
+        print(f"   ... and {len(installed) - 5} more")
+    
+    # Settings
+    print(f"\n⚙️  Settings:")
+    print(f"   Pattern matching: {'✅' if config.config['routing']['use_pattern_matching'] else '❌'}")
+    print(f"   Local LLM:        {'✅' if config.config['routing']['use_local_llm'] else '❌'}")
+    print(f"   Auto-fallback:    {'✅' if config.config['routing']['auto_fallback'] else '❌'}")
+    
+    # Logging
+    if HAS_LOGGER:
+        logging_enabled = config.config.get('logging', {}).get('enabled', False)
+        print(f"   Logging:          {'✅' if logging_enabled else '❌'}")
+    
+    # Quick actions
+    print("\n🚀 Quick Actions:")
+    print("   jeeves interactive     Start chatting")
+    print("   jeeves models          Manage models")
+    print("   jeeves status          Detailed status")
+    print("   jeeves --help          All commands")
+    print()
+
+
 def cmd_models(args):
     """Manage models"""
     config = JeevesConfig()
@@ -256,7 +308,8 @@ def main():
         epilog="""
 Examples:
   jeeves setup                    # Run initial setup
-  jeeves status                   # Check Jeeves status
+  jeeves list                     # Quick overview (models, status)
+  jeeves status                   # Detailed Jeeves status
   jeeves models                   # Manage installed models
   jeeves switch                   # Switch default model
   jeeves route "ls -la"          # Route a single request
@@ -279,6 +332,10 @@ Examples:
     # Status
     status_parser = subparsers.add_parser('status', help='Show Jeeves status')
     status_parser.set_defaults(func=cmd_status)
+    
+    # List
+    list_parser = subparsers.add_parser('list', help='List Jeeves overview')
+    list_parser.set_defaults(func=cmd_list)
     
     # Models
     models_parser = subparsers.add_parser('models', help='Manage models')
