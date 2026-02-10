@@ -1,0 +1,133 @@
+/* Custom styles for Jeeves documentation */
+
+/* Improve code block readability */
+.highlight {
+    border-radius: 6px;
+    margin: 1em 0;
+}
+
+/* Style for the announcement banner */
+.announcement {
+    background-color: #2d333b;
+    color: #adbac7;
+    padding: 0.5em 1em;
+    text-align: center;
+    font-size: 0.9em;
+}
+
+/* Better table styling */
+table.docutils {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 1em 0;
+}
+
+table.docutils th {
+    background-color: var(--color-background-secondary);
+    font-weight: 600;
+    padding: 0.75em;
+    text-align: left;
+}
+
+table.docutils td {
+    padding: 0.75em;
+    border-bottom: 1px solid var(--color-background-border);
+}
+
+table.docutils tr:hover {
+    background-color: var(--color-background-secondary);
+}
+
+/* Custom admonitions */
+.admonition.tip {
+    border-left-color: #2ea043;
+}
+
+.admonition.warning {
+    border-left-color: #d29922;
+}
+
+.admonition.note {
+    border-left-color: #58a6ff;
+}
+
+/* Improve heading spacing */
+h1, h2, h3 {
+    margin-top: 1.5em;
+    margin-bottom: 0.5em;
+}
+
+h1 {
+    border-bottom: 2px solid var(--color-background-border);
+    padding-bottom: 0.3em;
+}
+
+/* Style for the top-level header */
+h1:first-of-type {
+    font-size: 2.5em;
+    text-align: center;
+    border-bottom: none;
+    margin-top: 0;
+}
+
+/* Better list styling */
+ul, ol {
+    margin: 1em 0;
+    padding-left: 2em;
+}
+
+li {
+    margin: 0.5em 0;
+}
+
+/* Improve inline code */
+code.literal {
+    background-color: var(--color-background-secondary);
+    padding: 0.2em 0.4em;
+    border-radius: 3px;
+    font-size: 0.9em;
+}
+
+/* Style for the copy button */
+.copybutton {
+    opacity: 0.6;
+    transition: opacity 0.2s;
+}
+
+.copybutton:hover {
+    opacity: 1;
+}
+
+/* Better horizontal rules */
+hr {
+    border: none;
+    border-top: 2px solid var(--color-background-border);
+    margin: 2em 0;
+}
+
+/* Emphasis for key points */
+strong {
+    color: var(--color-brand-primary);
+}
+
+/* Center alignment for specific elements */
+.center {
+    text-align: center;
+}
+
+/* Custom styling for the TL;DR section */
+.tldr {
+    background-color: var(--color-background-secondary);
+    border-left: 4px solid var(--color-brand-primary);
+    padding: 1em;
+    margin: 1em 0;
+    border-radius: 0 6px 6px 0;
+}
+
+/* Emoji sizing in headers */
+h1 .emojione,
+h2 .emojione,
+h3 .emojione {
+    height: 1em;
+    width: auto;
+}
