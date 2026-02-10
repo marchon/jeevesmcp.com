@@ -43,23 +43,94 @@ check_command() {
     command -v "$1" >/dev/null 2>&1
 }
 
+detect_platform() {
+    if [[ "$OSTYPE" == "linux-gnu"* ]]; then
+        echo "linux"
+    elif [[ "$OSTYPE" == "darwin"* ]]; then
+        echo "macos"
+    elif [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" ]]; then
+        echo "windows"
+    else
+        echo "unknown"
+    fi
+}
+
+detect_shell() {
+    if [[ "$SHELL" == *"zsh"* ]]; then
+        echo "zsh"
+    elif [[ "$SHELL" == *"bash"* ]]; then
+        echo "bash"
+    elif [[ "$SHELL" == *"fish"* ]]; then
+        echo "fish"
+    else
+        echo "unknown"
+    fi
+}
+
+get_shell_config() {
+    local shell=$1
+    case "$shell" in
+        zsh)
+            echo "${HOME}/.zshrc"
+            ;;
+        bash)
+            echo "${HOME}/.bashrc"
+            ;;
+        fish)
+            echo "${HOME}/.config/fish/config.fish"
+            ;;
+        *)
+            echo ""
+            ;;
+    esac
+}
+
 install_ollama() {
     log_info "Ollama not found. Installing..."
     
-    if [[ "$OSTYPE" == "linux-gnu"* ]]; then
-        curl -fsSL https://ollama.com/install.sh | sh
-    elif [[ "$OSTYPE" == "darwin"* ]]; then
-        if check_command brew; then
-            brew install ollama
-        else
+    local platform=$(detect_platform)
+    
+    case "$platform" in
+        linux)
+            log_info "Installing Ollama on Linux..."
             curl -fsSL https://ollama.com/install.sh | sh
-        fi
-    else
-        log_error "Unsupported OS. Please install Ollama manually: https://ollama.com/download"
-        exit 1
-    fi
+            ;;
+        macos)
+            if check_command brew; then
+                log_info "Installing Ollama via Homebrew..."
+                # Handle potential mlx conflicts gracefully
+                brew install ollama 2>&1 || {
+                    log_warn "Homebrew install had warnings, trying to link..."
+                    brew link --overwrite ollama 2>/dev/null || true
+                }
+                
+                # Start Ollama service
+                log_info "Starting Ollama service..."
+                brew services start ollama 2>/dev/null || {
+                    log_warn "Could not start Ollama service automatically"
+                    log_info "You can start it later with: brew services start ollama"
+                }
+            else
+                log_info "Homebrew not found. Installing Ollama directly..."
+                curl -fsSL https://ollama.com/install.sh | sh
+            fi
+            ;;
+        *)
+            log_error "Unsupported OS: $OSTYPE"
+            log_info "Please install Ollama manually: https://ollama.com/download"
+            exit 1
+            ;;
+    esac
     
     log_success "Ollama installed"
+}
+
+check_ollama_running() {
+    if curl -s http://localhost:11434/api/tags > /dev/null 2>&1; then
+        return 0
+    else
+        return 1
+    fi
 }
 
 install_python_deps() {
@@ -67,12 +138,36 @@ install_python_deps() {
     
     cd "${INSTALL_DIR}"
     
+    local python_cmd=""
+    if check_command python3; then
+        python_cmd="python3"
+    elif check_command python; then
+        python_cmd="python"
+    fi
+    
+    if [ -z "$python_cmd" ]; then
+        log_error "Python not found. Please install Python 3.8+."
+        exit 1
+    fi
+    
+    # Check Python version
+    local py_version=$($python_cmd --version 2>&1 | grep -oE '[0-9]+\.[0-9]+' | head -1)
+    local major=$(echo "$py_version" | cut -d. -f1)
+    local minor=$(echo "$py_version" | cut -d. -f2)
+    
+    if [ "$major" -lt 3 ] || ([ "$major" -eq 3 ] && [ "$minor" -lt 8 ]); then
+        log_error "Python 3.8+ required. Found: $py_version"
+        exit 1
+    fi
+    
+    log_info "Using Python $py_version"
+    
     if check_command pip3; then
         pip3 install -q -r requirements.txt
     elif check_command pip; then
         pip install -q -r requirements.txt
     else
-        log_error "pip not found. Please install Python and pip."
+        log_error "pip not found. Please install pip."
         exit 1
     fi
     
@@ -136,44 +231,68 @@ EOF
 }
 
 add_to_path() {
+    local shell=$(detect_shell)
+    local shell_config=$(get_shell_config "$shell")
+    
     if [[ ":$PATH:" != *":${BIN_DIR}:"* ]]; then
         log_info "Adding ${BIN_DIR} to PATH..."
         
-        SHELL_CONFIG=""
-        if [[ "$SHELL" == *"zsh"* ]]; then
-            SHELL_CONFIG="${HOME}/.zshrc"
-        elif [[ "$SHELL" == *"bash"* ]]; then
-            SHELL_CONFIG="${HOME}/.bashrc"
-        fi
-        
-        if [ -n "$SHELL_CONFIG" ]; then
-            echo "export PATH=\"${BIN_DIR}:\$PATH\"" >> "$SHELL_CONFIG"
-            log_success "Added to ${SHELL_CONFIG}"
-            log_warn "Please run: source ${SHELL_CONFIG}"
-        else
-            log_warn "Please add ${BIN_DIR} to your PATH manually"
-        fi
+        case "$shell" in
+            zsh|bash)
+                if [ -n "$shell_config" ]; then
+                    echo "export PATH=\"${BIN_DIR}:\$PATH\"" >> "$shell_config"
+                    log_success "Added to ${shell_config}"
+                    log_info "Please run: source ${shell_config}"
+                else
+                    log_warn "Please add ${BIN_DIR} to your PATH manually"
+                fi
+                ;;
+            fish)
+                mkdir -p "$(dirname "$shell_config")"
+                echo "fish_add_path ${BIN_DIR}" >> "$shell_config"
+                log_success "Added to ${shell_config}"
+                log_info "Please run: source ${shell_config}"
+                ;;
+            *)
+                log_warn "Unknown shell. Please add ${BIN_DIR} to your PATH manually"
+                log_info "Add this line to your shell config:"
+                log_info "  export PATH=\"${BIN_DIR}:\$PATH\""
+                ;;
+        esac
     fi
 }
 
 start_ollama() {
-    if ! pgrep -x "ollama" > /dev/null; then
-        log_info "Starting Ollama server..."
-        ollama serve &
+    if check_ollama_running; then
+        log_success "Ollama is already running"
+        return 0
+    fi
+    
+    log_info "Starting Ollama server..."
+    
+    # Try to start Ollama
+    if check_command ollama; then
+        ollama serve > /dev/null 2>&1 &
         sleep 2
         
         # Wait for Ollama to be ready
-        for i in {1..10}; do
-            if curl -s http://localhost:11434/api/tags > /dev/null 2>&1; then
+        local max_attempts=30
+        local attempt=1
+        
+        while [ $attempt -le $max_attempts ]; do
+            if check_ollama_running; then
                 log_success "Ollama is running"
                 return 0
             fi
             sleep 1
+            attempt=$((attempt + 1))
         done
         
-        log_warn "Ollama may not have started properly. Continuing anyway..."
+        log_warn "Ollama may not have started properly"
+        log_info "You can start it manually with: ollama serve"
     else
-        log_success "Ollama is already running"
+        log_error "Ollama command not found after installation"
+        exit 1
     fi
 }
 
@@ -192,6 +311,55 @@ run_setup() {
     fi
 }
 
+uninstall() {
+    log_warn "Uninstalling Jeeves..."
+    
+    # Remove installation directory
+    if [ -d "${INSTALL_DIR}" ]; then
+        rm -rf "${INSTALL_DIR}"
+        log_success "Removed ${INSTALL_DIR}"
+    fi
+    
+    # Remove CLI wrapper
+    if [ -f "${BIN_DIR}/jeeves" ]; then
+        rm -f "${BIN_DIR}/jeeves"
+        log_success "Removed ${BIN_DIR}/jeeves"
+    fi
+    
+    # Remove config (ask first)
+    local config_dir="${HOME}/.config/jeeves"
+    if [ -d "$config_dir" ]; then
+        read -p "Remove configuration directory ${config_dir}? [y/N] " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            rm -rf "$config_dir"
+            log_success "Removed ${config_dir}"
+        fi
+    fi
+    
+    log_success "Jeeves has been uninstalled"
+    log_info "Note: Ollama was not removed. To uninstall Ollama:"
+    log_info "  macOS: brew uninstall ollama"
+    log_info "  Linux: rm -rf ~/.ollama and remove ollama binary"
+}
+
+print_help() {
+    echo "🎩 Jeeves Installer"
+    echo ""
+    echo "Usage:"
+    echo "  curl -fsSL https://.../install.sh | bash"
+    echo ""
+    echo "Options:"
+    echo "  --no-setup    Skip the setup wizard"
+    echo "  --uninstall   Remove Jeeves"
+    echo "  --help        Show this help"
+    echo ""
+    echo "After installation:"
+    echo "  jeeves --help          Show Jeeves help"
+    echo "  jeeves status          Check Jeeves status"
+    echo "  jeeves interactive     Start interactive mode"
+}
+
 main() {
     print_banner
     
@@ -199,6 +367,7 @@ main() {
     log_info "Checking Python installation..."
     if ! check_command python3 && ! check_command python; then
         log_error "Python not found. Please install Python 3.8 or higher."
+        log_info "Visit: https://www.python.org/downloads/"
         exit 1
     fi
     log_success "Python found"
@@ -209,6 +378,11 @@ main() {
         install_ollama
     else
         log_success "Ollama found"
+    fi
+    
+    # Check if Ollama is running
+    if ! check_ollama_running; then
+        start_ollama
     fi
     
     # Clone repository
@@ -223,24 +397,35 @@ main() {
     # Add to PATH
     add_to_path
     
-    # Start Ollama
-    start_ollama
-    
     echo ""
     log_success "Jeeves installation complete!"
     echo ""
     
     # Run setup wizard
-    run_setup
+    if [ -z "$NO_SETUP" ]; then
+        run_setup
+    else
+        log_info "Skipping setup wizard (--no-setup)"
+        log_info "Run 'jeeves setup' to configure later"
+    fi
     
     echo ""
     log_success "Jeeves is ready to serve! 🎩"
     echo ""
-    echo "Usage:"
+    echo "Quick start:"
     echo "  jeeves --help          Show help"
     echo "  jeeves status          Check status"
     echo "  jeeves interactive     Start interactive mode"
     echo ""
+    
+    # Platform-specific notes
+    local platform=$(detect_platform)
+    case "$platform" in
+        macos)
+            log_info "macOS users: If jeeves command not found, run:"
+            log_info "  source ~/.zshrc  (or ~/.bashrc)"
+            ;;
+    esac
 }
 
 # Handle arguments
@@ -250,15 +435,12 @@ while [[ $# -gt 0 ]]; do
             NO_SETUP=1
             shift
             ;;
+        --uninstall)
+            uninstall
+            exit 0
+            ;;
         --help|-h)
-            echo "Jeeves Installer"
-            echo ""
-            echo "Usage:"
-            echo "  curl -fsSL https://.../install.sh | bash"
-            echo ""
-            echo "Options:"
-            echo "  --no-setup    Skip the setup wizard"
-            echo "  --help        Show this help"
+            print_help
             exit 0
             ;;
         *)
