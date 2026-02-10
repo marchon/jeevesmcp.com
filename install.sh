@@ -1,6 +1,6 @@
 #!/bin/bash
 # Jeeves One-Line Installer
-# Usage: curl -fsSL https://raw.githubusercontent.com/yourusername/jeeves/main/install.sh | bash
+# Usage: curl -fsSL https://raw.githubusercontent.com/marchon/jeevesmcp/main/install.sh | bash
 
 set -e
 
@@ -12,7 +12,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Configuration
-REPO_URL="https://github.com/marchon/jeeves.ai.git"
+REPO_URL="https://github.com/marchon/jeevesmcp.git"
 INSTALL_DIR="${HOME}/.local/share/jeeves"
 BIN_DIR="${HOME}/.local/bin"
 

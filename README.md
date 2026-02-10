@@ -3,7 +3,7 @@
 **TL;DR:** Install a smart local LLM router in one line. Jeeves handles simple tasks locally (fast) and escalates complex requests to cloud AI automatically.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/marchon/jeeves.ai/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/marchon/jeevesmcp/main/install.sh | bash
 ```
 
 ---
@@ -36,7 +36,7 @@ curl -fsSL https://raw.githubusercontent.com/marchon/jeeves.ai/main/install.sh |
 ### One-Line Install (Recommended)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/marchon/jeeves.ai/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/marchon/jeevesmcp/main/install.sh | bash
 ```
 
 **This will:**
@@ -258,7 +258,7 @@ If the one-liner doesn't work:
 curl -fsSL https://ollama.com/install.sh | sh
 
 # 2. Clone Jeeves
-git clone https://github.com/marchon/jeeves.ai.git ~/.local/share/jeeves
+git clone https://github.com/marchon/jeevesmcp.git ~/.local/share/jeeves
 cd ~/.local/share/jeeves
 
 # 3. Install dependencies
@@ -328,7 +328,7 @@ MIT License - See [LICENSE](LICENSE) file
 </p>
 
 <p align="center">
-  <a href="https://github.com/marchon/jeeves.ai">GitHub</a> •
-  <a href="https://github.com/marchon/jeeves.ai/issues">Issues</a> •
-  <a href="https://github.com/marchon/jeeves.ai/discussions">Discussions</a>
+  <a href="https://github.com/marchon/jeevesmcp">GitHub</a> •
+  <a href="https://github.com/marchon/jeevesmcp/issues">Issues</a> •
+  <a href="https://github.com/marchon/jeevesmcp/discussions">Discussions</a>
 </p>
