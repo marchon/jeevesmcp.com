@@ -447,27 +447,6 @@ Jeeves:"""
                 self.logger.log_error('LLM_ERROR', error_msg, traceback=str(e))
             return error_msg
     
-    def _print_routing_message(self, destination: str, method: str, reason: str = ""):
-        """Print fine-tuned messaging about routing decisions"""
-        if destination == 'local':
-            if method == 'pattern_match':
-                print("✅ Jeeves: Handled instantly with pattern matching")
-            elif method == 'llm_classification':
-                print("✅ Jeeves: Local LLM handled this request")
-            else:
-                print("✅ Jeeves: Processed locally")
-        else:  # cloud
-            if method == 'fallback_uncertainty':
-                print("🤔 Jeeves: Local LLM was uncertain → Escalating to primary AI")
-                print(f"   Reason: {reason}")
-            elif method == 'fallback_incomplete':
-                print("📊 Jeeves: Local response incomplete → Escalating for better results")
-            elif method == 'llm_classification':
-                print("🧠 Jeeves: Complex request detected → Routing to primary AI")
-                print("   This requires deeper reasoning than the local model can provide.")
-            else:
-                print("☁️  Jeeves: Routing to primary AI for best results")
-    
     def route(self, request: str) -> Dict[str, Any]:
         """
         Main routing method - decides where to send the request
@@ -491,17 +470,19 @@ Jeeves:"""
             })
         
         try:
+            # Get log file if logging is enabled
+            log_file = str(self.logger.current_log_file) if self.logger and self.logger.current_log_file else None
+            
             # Step 1: Pattern matching (fastest)
             if self._matches_shell_pattern(request):
-                print("🎯 Jeeves: Recognized shell command")
                 result = self._execute_local_shell(request)
-                self._print_routing_message('local', 'pattern_match')
                 
                 result_dict = {
                     'destination': 'local',
                     'method': 'pattern_match',
                     'result': result,
-                    'should_escalate': False
+                    'should_escalate': False,
+                    'log_file': log_file
                 }
                 
                 if self.logger:
@@ -513,7 +494,6 @@ Jeeves:"""
             file_match = self._matches_file_pattern(request)
             if file_match:
                 action, groups = file_match
-                print(f"🎯 Jeeves: Recognized file operation ({action})")
                 
                 if action == 'read_file':
                     result = self._read_local_file(groups[0])
@@ -522,13 +502,12 @@ Jeeves:"""
                 else:
                     result = f"File operation '{action}' not yet implemented"
                 
-                self._print_routing_message('local', 'pattern_match')
-                
                 result_dict = {
                     'destination': 'local',
                     'method': 'pattern_match',
                     'result': result,
-                    'should_escalate': False
+                    'should_escalate': False,
+                    'log_file': log_file
                 }
                 
                 if self.logger:
@@ -538,7 +517,6 @@ Jeeves:"""
             
             # Step 3: Local LLM classification
             if self.config.config['routing']['use_local_llm']:
-                print("🤔 Jeeves: Analyzing request complexity...")
                 classification = self._classify_with_local_llm(request)
                 
                 category = classification.get('classification', 'UNCERTAIN')
@@ -554,8 +532,6 @@ Jeeves:"""
                     simple_threshold = 0.7
                     moderate_threshold = 0.8
                 
-                print(f"   Analysis: {category} (confidence: {confidence:.0%})")
-                
                 # Handle based on classification with model-specific thresholds
                 if category == 'SIMPLE' and confidence >= simple_threshold:
                     # Try to handle locally
@@ -563,14 +539,12 @@ Jeeves:"""
                     
                     # Check if response indicates uncertainty
                     if self.config.config['routing']['auto_fallback'] and self._is_uncertain_response(result):
-                        self._print_routing_message('cloud', 'fallback_uncertainty', 
-                                                    "Local LLM expressed uncertainty")
-                        
                         result_dict = {
                             'destination': 'cloud',
                             'method': 'fallback_uncertainty',
                             'classification': classification,
-                            'should_escalate': True
+                            'should_escalate': True,
+                            'log_file': log_file
                         }
                         
                         if self.logger:
@@ -578,14 +552,13 @@ Jeeves:"""
                         
                         return result_dict
                     
-                    self._print_routing_message('local', 'llm_classification')
-                    
                     result_dict = {
                         'destination': 'local',
                         'method': 'llm_classification',
                         'classification': classification,
                         'result': result,
-                        'should_escalate': False
+                        'should_escalate': False,
+                        'log_file': log_file
                     }
                     
                     if self.logger:
@@ -598,14 +571,12 @@ Jeeves:"""
                     result = self._generate_local_response(request)
                     
                     if len(result) < 50 or self._is_uncertain_response(result):
-                        self._print_routing_message('cloud', 'fallback_incomplete',
-                                                    "Response too brief or uncertain")
-                        
                         result_dict = {
                             'destination': 'cloud',
                             'method': 'fallback_incomplete',
                             'classification': classification,
-                            'should_escalate': True
+                            'should_escalate': True,
+                            'log_file': log_file
                         }
                         
                         if self.logger:
@@ -613,14 +584,13 @@ Jeeves:"""
                         
                         return result_dict
                     
-                    self._print_routing_message('local', 'llm_classification')
-                    
                     result_dict = {
                         'destination': 'local',
                         'method': 'llm_classification',
                         'classification': classification,
                         'result': result,
-                        'should_escalate': False
+                        'should_escalate': False,
+                        'log_file': log_file
                     }
                     
                     if self.logger:
@@ -630,14 +600,12 @@ Jeeves:"""
                 
                 else:
                     # COMPLEX or UNCERTAIN - go to cloud
-                    reason = "Complex reasoning required" if category == 'COMPLEX' else "Uncertain classification"
-                    self._print_routing_message('cloud', 'llm_classification', reason)
-                    
                     result_dict = {
                         'destination': 'cloud',
                         'method': 'llm_classification',
                         'classification': classification,
-                        'should_escalate': True
+                        'should_escalate': True,
+                        'log_file': log_file
                     }
                     
                     if self.logger:
@@ -646,12 +614,11 @@ Jeeves:"""
                     return result_dict
             
             # Default: escalate to cloud
-            self._print_routing_message('cloud', 'default', 'Default routing to primary AI')
-            
             result_dict = {
                 'destination': 'cloud',
                 'method': 'default',
-                'should_escalate': True
+                'should_escalate': True,
+                'log_file': log_file
             }
             
             if self.logger:

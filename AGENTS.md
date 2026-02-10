@@ -11,7 +11,8 @@ This file contains essential information for AI coding agents working on the Jee
 **Key Value Proposition**: Fast local execution for simple commands (shell, file operations) in milliseconds instead of waiting for cloud round-trips.
 
 **Version**: 0.1.0  
-**License**: MIT License
+**License**: MIT License  
+**Repository**: https://github.com/marchon/jeevesmcp.com
 
 ---
 
@@ -31,18 +32,18 @@ This file contains essential information for AI coding agents working on the Jee
 
 ```
 jeeves/
-├── main.py                 # CLI entry point with argparse subcommands (~178 lines)
-├── router.py               # Core routing logic (JeevesRouter class, ~544 lines)
-├── config.py               # Configuration management (JeevesConfig class, ~531 lines)
-├── platform_utils.py       # Cross-platform OS/shell/terminal detection (~450 lines)
-├── model_configs.py        # Model-specific optimizations (~500 lines)
-├── llm_logger.py           # LLM interaction logging (~400 lines)
+├── main.py                 # CLI entry point with argparse subcommands (~379 lines)
+├── router.py               # Core routing logic (JeevesRouter class, ~748 lines)
+├── config.py               # Configuration management (JeevesConfig class, ~609 lines)
+├── platform_utils.py       # Cross-platform OS/shell/terminal detection (~441 lines)
+├── model_configs.py        # Model-specific optimizations (~591 lines)
+├── llm_logger.py           # LLM interaction logging (~473 lines)
 ├── __init__.py             # Package exports and version info
 ├── setup.py                # Python package setup (setuptools, legacy support)
 ├── pyproject.toml          # Modern Python project configuration
 ├── requirements.txt        # Production Python dependencies
 ├── pytest.ini             # Pytest configuration
-├── install.sh              # Full-featured bash installer (~270 lines)
+├── install.sh              # Full-featured bash installer (~474 lines)
 ├── install-oneliner.sh     # Minimal one-liner install script (~68 lines)
 ├── run_tests.sh            # Bash test runner with auto-setup (~240 lines)
 ├── run_tests.py            # Python test runner, cross-platform (~401 lines)
@@ -87,11 +88,11 @@ The main router class that decides whether to handle requests locally or escalat
 **Key Methods:**
 - `route(request: str) -> Dict[str, Any]` - Main routing logic, returns dict with `destination`, `method`, `result`, `should_escalate`
 - `handle(request: str) -> str` - Convenience method that returns result or `[JEEVES_ESCALATE]` marker
-- `_classify_with_local_llm(request: str)` - Uses Ollama API to classify complexity
+- `_classify_with_local_llm(request: str)` - Uses Ollama API to classify complexity with model-specific prompts
 - `_execute_local_shell(command: str)` - Executes shell commands via subprocess
 - `_read_local_file(filepath: str)` - Reads files with 10MB size limit
 - `_list_local_directory(dirpath: str)` - Lists directory contents with emoji indicators
-- `_generate_local_response(request: str)` - Generates responses using local LLM
+- `_generate_local_response(request: str)` - Generates responses using local LLM with model-optimized prompts
 
 **Routing Logic Flow:**
 1. **Pattern Matching** (fastest, 0ms): Checks against `SHELL_PATTERNS` and `FILE_PATTERNS`
@@ -108,18 +109,18 @@ The main router class that decides whether to handle requests locally or escalat
 Model-specific configurations for optimal performance with different LLM families.
 
 **Supported Model Families:**
-- **Qwen** (Alibaba) - ChatML format
-- **Llama** (Meta) - Llama-2/3 format
-- **Phi** (Microsoft) - Phi chat format
-- **Gemma** (Google) - Gemma format
-- **DeepSeek** - DeepSeek format
+- **Qwen** (Alibaba) - ChatML format with `<|im_start|>`/`<|im_end|>` tokens
+- **Llama** (Meta) - Llama-3 format with `<|start_header_id|>` tokens
+- **Phi** (Microsoft) - Phi chat format with `<|user|>`/`<|assistant|>` tokens
+- **Gemma** (Google) - Gemma format with `<start_of_turn>`/`<end_of_turn>`
+- **DeepSeek** - DeepSeek format with reasoning optimization
 
 **Model-Specific Optimizations:**
-- **Prompt Templates**: Different formats for each model family (ChatML, Llama-2, Alpaca, etc.)
+- **Prompt Templates**: Different formats for each model family (ChatML, Llama-3, Alpaca, etc.)
 - **Generation Parameters**: Optimal temperature, top_p, top_k per model
 - **Confidence Thresholds**: Model-specific routing thresholds
-  - Small models (0.5B-1.5B): Higher thresholds (0.8) for reliability
-  - Medium models (3B-4B): Standard thresholds (0.7)
+  - Small models (0.5B-1.5B): Higher thresholds (0.75-0.8) for reliability
+  - Medium models (3B-4B): Standard thresholds (0.7-0.8)
   - Large models (7B+): Standard thresholds (0.7)
 - **Max Tokens**: Size-appropriate limits (small: 256, medium: 512-1024, large: 2048)
 - **Stop Sequences**: Model-specific stop tokens
@@ -192,7 +193,10 @@ Comprehensive logging system for LLM interactions with timestamp-based log files
 
 Manages user configuration, Ollama integration, and model management.
 
-**Configuration Location:** `~/.config/jeeves/config.json`
+**Configuration Location:** 
+- Linux: `~/.config/jeeves/config.json`
+- macOS: `~/Library/Application Support/jeeves/config.json`
+- Windows: `%APPDATA%\jeeves\config.json`
 
 **Default Configuration Structure:**
 ```python
@@ -233,7 +237,7 @@ Manages user configuration, Ollama integration, and model management.
 - `get_all_suggested_models()` - Get combined built-in + remote model suggestions
 
 **Interactive Functions:**
-- `interactive_setup(config)` - 6-step setup wizard
+- `interactive_setup(config)` - 7-step setup wizard with automatic Ollama installation
 - `switch_model(config)` - Interactive model switching
 - `manage_models(config)` - Model management menu
 
@@ -244,8 +248,8 @@ Cross-platform detection and terminal integration utilities.
 **Key Classes:**
 - `PlatformInfo` - Container for platform detection results
 - `OperatingSystem` - Enum: WINDOWS, MACOS, LINUX, UNKNOWN
-- `ShellType` - Enum: BASH, ZSH, FISH, POWERSHELL, CMD, UNKNOWN  
-- `TerminalType` - Enum for terminal emulators
+- `ShellType` - Enum: BASH, ZSH, FISH, POWERSHELL, CMD, UNKNOWN
+- `TerminalType` - Enum for terminal emulators (GNOME Terminal, iTerm2, Windows Terminal, etc.)
 
 **Key Features:**
 - **OS Detection**: Windows, macOS, Linux, WSL detection
@@ -272,15 +276,12 @@ open_in_terminal("ollama serve", title="Ollama Server")
 Available subcommands:
 - `jeeves setup` - Interactive setup wizard (7 steps, includes LLM selection & auto-install)
 - `jeeves status` - Show Jeeves and Ollama status
+- `jeeves list` - Quick overview of Jeeves state
 - `jeeves models` - Manage installed models (install/remove/set default)
 - `jeeves switch` - Switch default model
 - `jeeves route "<request>"` - Route a single request and show result
 - `jeeves interactive` - Start interactive chat mode with banner
-- `jeeves logging on/off` - Enable/disable LLM interaction logging
-- `jeeves logging status` - Show logging status
-- `jeeves logging list` - List recent log files
-- `jeeves logging view --file FILE` - View a specific log file
-- `jeeves logging clear --keep N` - Clear old logs, keeping N most recent
+- `jeeves logging on/off/status/list/view/clear` - Control LLM interaction logging
 
 ---
 
@@ -337,16 +338,6 @@ pytest tests/ -v                          # All tests
 pytest tests/ -m "not integration" -v     # Unit tests only
 pytest tests/test_router.py -v            # Specific test file
 pytest tests/test_router.py::TestShellPatternMatching::test_simple_shell_commands -v  # Specific test
-```
-
-### Documentation
-
-**Build Documentation:**
-```bash
-cd docs
-pip install -r requirements.txt  # Install sphinx, furo, etc.
-make html                        # Build HTML docs
-# Output: docs/_build/html/
 ```
 
 ---
@@ -514,6 +505,11 @@ When adding new config options:
    - JSON format - no sensitive data expected
    - File permissions follow umask
 
+5. **LLM Interaction Logging**:
+   - Disabled by default for privacy
+   - Logs may contain user commands and system context
+   - Log files stored in platform-specific log directories
+
 ---
 
 ## Model Recommendations
@@ -604,12 +600,14 @@ For maintainers:
 The project maintains both `pyproject.toml` (modern standard) and `setup.py` (legacy support):
 
 - **pyproject.toml**: Primary configuration, used by pip, pytest, coverage
+  - Package name: `jeeves`
+  - Entry point: `jeeves=main:main`
 - **setup.py**: Legacy support, entry point for editable installs
+  - Package name: `jeeves-router`
 
 Both specify:
-- Package name: `jeeves` (pyproject.toml) / `jeeves-router` (setup.py)
 - Version: `0.1.0`
-- Entry point: `jeeves=main:main`
+- Python requirement: `>=3.8`
 
 ### Import Structure
 
@@ -638,3 +636,4 @@ except ImportError:
 - **Issues**: https://github.com/marchon/jeevesmcp.com/issues
 - **Discussions**: https://github.com/marchon/jeevesmcp.com/discussions
 - **Ollama**: https://ollama.com
+- **Documentation**: See `docs/` directory for Sphinx documentation
