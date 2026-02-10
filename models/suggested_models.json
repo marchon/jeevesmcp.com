@@ -1,0 +1,99 @@
+{
+  "version": "1.0.0",
+  "last_updated": "2026-02-09",
+  "categories": {
+    "ultra_fast": [
+      {
+        "name": "qwen2.5:0.5b",
+        "size": "400MB",
+        "speed": "Very Fast",
+        "desc": "Minimal resource usage, great for routing",
+        "recommended_for": ["classification", "routing", "pattern_matching"],
+        "min_ram": "1GB"
+      },
+      {
+        "name": "phi3:mini",
+        "size": "2.3GB",
+        "speed": "Fast",
+        "desc": "Microsoft's efficient small model",
+        "recommended_for": ["classification", "simple_qa", "summarization"],
+        "min_ram": "4GB"
+      }
+    ],
+    "balanced": [
+      {
+        "name": "qwen2.5:1.5b",
+        "size": "1GB",
+        "speed": "Fast",
+        "desc": "Recommended starter - good balance of speed and quality",
+        "recommended_for": ["classification", "routing", "local_qa"],
+        "min_ram": "2GB"
+      },
+      {
+        "name": "llama3.2:3b",
+        "size": "2GB",
+        "speed": "Fast",
+        "desc": "Meta's latest small model with good instruction following",
+        "recommended_for": ["classification", "tool_use", "local_tasks"],
+        "min_ram": "4GB"
+      },
+      {
+        "name": "gemma2:2b",
+        "size": "1.6GB",
+        "speed": "Fast",
+        "desc": "Google's efficient model with strong performance",
+        "recommended_for": ["classification", "reasoning", "local_tasks"],
+        "min_ram": "3GB"
+      }
+    ],
+    "capable": [
+      {
+        "name": "qwen2.5:7b",
+        "size": "4.5GB",
+        "speed": "Moderate",
+        "desc": "Better reasoning while still fast",
+        "recommended_for": ["complex_classification", "local_reasoning", "code_analysis"],
+        "min_ram": "8GB"
+      },
+      {
+        "name": "llama3.2:8b",
+        "size": "4.9GB",
+        "speed": "Moderate",
+        "desc": "Strong performance for complex local tasks",
+        "recommended_for": ["complex_tasks", "code_generation", "local_analysis"],
+        "min_ram": "8GB"
+      },
+      {
+        "name": "deepseek-r1:1.5b",
+        "size": "1.1GB",
+        "speed": "Fast",
+        "desc": "Reasoning capabilities in small package",
+        "recommended_for": ["reasoning", "step_by_step", "classification"],
+        "min_ram": "2GB"
+      }
+    ],
+    "experimental": [
+      {
+        "name": "nemotron-mini:4b",
+        "size": "2.5GB",
+        "speed": "Fast",
+        "desc": "NVIDIA's efficient small model",
+        "recommended_for": ["classification", "local_tasks"],
+        "min_ram": "4GB"
+      },
+      {
+        "name": "smollm2:1.7b",
+        "size": "1GB",
+        "speed": "Very Fast",
+        "desc": "Hugging Face's tiny but capable model",
+        "recommended_for": ["classification", "simple_tasks"],
+        "min_ram": "2GB"
+      }
+    ]
+  },
+  "metadata": {
+    "recommended_default": "qwen2.5:1.5b",
+    "minimum_viable": "qwen2.5:0.5b",
+    "update_frequency": "weekly"
+  }
+}
