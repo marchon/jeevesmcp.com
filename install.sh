@@ -12,7 +12,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Configuration
-REPO_URL="https://github.com/YOUR_USERNAME/jeeves.git"
+REPO_URL="https://github.com/marchon/jeeves.git"
 INSTALL_DIR="${HOME}/.local/share/jeeves"
 BIN_DIR="${HOME}/.local/bin"
 
