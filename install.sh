@@ -301,13 +301,26 @@ run_setup() {
     
     cd "${INSTALL_DIR}"
     
-    if check_command python3; then
-        python3 main.py setup
-    elif check_command python; then
-        python main.py setup
+    # Check if stdin is a terminal
+    if [ -t 0 ]; then
+        # Interactive mode - run setup normally
+        if check_command python3; then
+            python3 main.py setup
+        elif check_command python; then
+            python main.py setup
+        else
+            log_error "Python not found. Please install Python 3.8+."
+            exit 1
+        fi
     else
-        log_error "Python not found. Please install Python 3.8+."
-        exit 1
+        # Non-interactive mode (piped input) - can't run setup
+        log_warn "Cannot run interactive setup in non-interactive mode"
+        log_info "Please run setup manually after installation:"
+        log_info "  jeeves setup"
+        log_info ""
+        log_info "Or install with default settings by running:"
+        log_info "  curl -fsSL .../install.sh | bash -s -- --no-setup"
+        log_info "  jeeves setup  # Run this separately in your terminal"
     fi
 }
 
@@ -412,10 +425,19 @@ main() {
     echo ""
     log_success "Jeeves is ready to serve! 🎩"
     echo ""
+    
+    # If setup didn't run (non-interactive), remind user
+    if [ -n "$NO_SETUP" ] || [ ! -t 0 ]; then
+        log_info "To complete setup, please run:"
+        log_info "  jeeves setup"
+        log_info ""
+    fi
+    
     echo "Quick start:"
     echo "  jeeves --help          Show help"
     echo "  jeeves status          Check status"
     echo "  jeeves interactive     Start interactive mode"
+    echo "  jeeves setup           Run setup wizard"
     echo ""
     
     # Platform-specific notes
