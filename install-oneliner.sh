@@ -5,7 +5,7 @@
 
 set -e
 
-JEEVES_REPO="https://github.com/marchon/jeeves"
+JEEVES_REPO="https://github.com/marchon/jeeves.ai"
 INSTALL_DIR="${HOME}/.local/share/jeeves"
 BIN_DIR="${HOME}/.local/bin"
 
