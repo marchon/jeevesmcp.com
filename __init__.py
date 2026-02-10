@@ -19,8 +19,14 @@ Quick Start:
         print(result)
 """
 
-from .router import JeevesRouter
-from .config import JeevesConfig, interactive_setup
+try:
+    # Try relative imports (when imported as a package)
+    from .router import JeevesRouter
+    from .config import JeevesConfig, interactive_setup
+except ImportError:
+    # Fall back to absolute imports (when running directly)
+    from router import JeevesRouter
+    from config import JeevesConfig, interactive_setup
 
 __version__ = "0.1.0"
 __all__ = ["JeevesRouter", "JeevesConfig", "interactive_setup"]

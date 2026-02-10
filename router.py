@@ -10,9 +10,32 @@ import subprocess
 import json
 import sys
 import os
+import time
 from typing import Optional, Tuple, Dict, Any
 from pathlib import Path
 from config import JeevesConfig
+
+# Try to import logger, but make it optional
+try:
+    from llm_logger import LLMLogger, get_logger
+    HAS_LOGGER = True
+except ImportError:
+    HAS_LOGGER = False
+
+# Try to import model configs for optimization
+try:
+    from model_configs import (
+        format_classification_prompt,
+        format_response_prompt,
+        get_classification_params,
+        get_response_params,
+        get_confidence_thresholds,
+        get_model_capabilities,
+        detect_model_family,
+    )
+    HAS_MODEL_CONFIGS = True
+except ImportError:
+    HAS_MODEL_CONFIGS = False
 
 
 class JeevesRouter:
@@ -123,6 +146,9 @@ class JeevesRouter:
     
     def __init__(self, config: Optional[JeevesConfig] = None):
         self.config = config or JeevesConfig()
+        self.logger = None
+        if HAS_LOGGER:
+            self.logger = get_logger(self.config.config)
         self._ensure_ollama_running()
     
     def _ensure_ollama_running(self):
@@ -159,15 +185,21 @@ class JeevesRouter:
         return None
     
     def _classify_with_local_llm(self, request: str) -> Dict[str, Any]:
-        """Use local LLM to classify request complexity"""
+        """Use local LLM to classify request complexity with model-specific optimization"""
         if not self.config.config['routing']['use_local_llm']:
             return {'classification': 'UNCERTAIN', 'confidence': 0}
         
         model = self.config.config['jeeves']['default_model']
         timeout = self.config.config['jeeves']['timeout_seconds']
         
-        # Classification prompt
-        prompt = f"""You are a request classifier. Classify the following user request.
+        # Get model-specific prompt and parameters
+        if HAS_MODEL_CONFIGS:
+            prompt = format_classification_prompt(model, request)
+            params = get_classification_params(model)
+            capabilities = get_model_capabilities(model)
+        else:
+            # Fallback to generic prompt
+            prompt = f"""You are a request classifier. Classify the following user request.
 
 Request: "{request}"
 
@@ -181,6 +213,16 @@ If you are uncertain or the request is unclear, respond with: UNCERTAIN
 Your response must be ONLY the category word (SIMPLE, MODERATE, COMPLEX, or UNCERTAIN).
 
 Classification:"""
+            params = {"temperature": 0.1, "num_predict": 10}
+            capabilities = {"classification": 0.7, "response": 0.6, "reasoning": 0.5}
+
+        # Log the decision prompt
+        if self.logger:
+            self.logger.log_jeeves_decision_prompt(
+                prompt=prompt,
+                model=model,
+                context={**params, "timeout": timeout, "capabilities": capabilities}
+            )
 
         try:
             response = requests.post(
@@ -189,7 +231,7 @@ Classification:"""
                     "model": model,
                     "prompt": prompt,
                     "stream": False,
-                    "options": {"temperature": 0.1, "num_predict": 10}
+                    "options": params
                 },
                 timeout=timeout
             )
@@ -199,22 +241,43 @@ Classification:"""
                 classification = result.get('response', '').strip().upper()
                 
                 # Clean up classification
+                parsed_classification = 'UNCERTAIN'
                 for valid in ['SIMPLE', 'MODERATE', 'COMPLEX', 'UNCERTAIN']:
                     if valid in classification:
-                        return {
-                            'classification': valid,
-                            'raw_response': result.get('response', ''),
-                            'confidence': self._extract_confidence(classification)
-                        }
+                        parsed_classification = valid
+                        break
                 
-                return {'classification': 'UNCERTAIN', 'raw_response': classification, 'confidence': 0}
+                confidence = self._extract_confidence(classification)
+                
+                # Log the decision response
+                if self.logger:
+                    self.logger.log_jeeves_decision_response(
+                        response=result.get('response', ''),
+                        classification=parsed_classification,
+                        confidence=confidence
+                    )
+                
+                return {
+                    'classification': parsed_classification,
+                    'raw_response': result.get('response', ''),
+                    'confidence': confidence
+                }
             
-            return {'classification': 'UNCERTAIN', 'error': f'HTTP {response.status_code}', 'confidence': 0}
+            error_result = {'classification': 'UNCERTAIN', 'error': f'HTTP {response.status_code}', 'confidence': 0}
+            if self.logger:
+                self.logger.log_error('LLM_ERROR', f'HTTP {response.status_code}')
+            return error_result
             
         except requests.Timeout:
-            return {'classification': 'UNCERTAIN', 'error': 'timeout', 'confidence': 0}
+            error_result = {'classification': 'UNCERTAIN', 'error': 'timeout', 'confidence': 0}
+            if self.logger:
+                self.logger.log_error('LLM_ERROR', 'Local LLM classification timeout')
+            return error_result
         except Exception as e:
-            return {'classification': 'UNCERTAIN', 'error': str(e), 'confidence': 0}
+            error_result = {'classification': 'UNCERTAIN', 'error': str(e), 'confidence': 0}
+            if self.logger:
+                self.logger.log_error('LLM_ERROR', str(e))
+            return error_result
     
     def _extract_confidence(self, response: str) -> float:
         """Extract confidence score from classification response"""
@@ -238,6 +301,7 @@ Classification:"""
     
     def _execute_local_shell(self, command: str) -> str:
         """Execute a shell command locally"""
+        start_time = time.time()
         try:
             result = subprocess.run(
                 command,
@@ -248,6 +312,8 @@ Classification:"""
                 cwd=os.getcwd()
             )
             
+            execution_time_ms = (time.time() - start_time) * 1000
+            
             output = result.stdout
             if result.stderr:
                 output += f"\n[stderr]: {result.stderr}"
@@ -255,12 +321,30 @@ Classification:"""
             if result.returncode != 0:
                 output += f"\n[exit code: {result.returncode}]"
             
-            return output if output else "(no output)"
+            result_str = output if output else "(no output)"
+            
+            # Log the execution
+            if self.logger:
+                self.logger.log_local_execution(
+                    command=command,
+                    result=result_str,
+                    execution_time_ms=execution_time_ms
+                )
+            
+            return result_str
             
         except subprocess.TimeoutExpired:
-            return "Error: Command timed out after 60 seconds"
+            execution_time_ms = (time.time() - start_time) * 1000
+            error_msg = "Error: Command timed out after 60 seconds"
+            if self.logger:
+                self.logger.log_error('EXECUTION_ERROR', error_msg)
+            return error_msg
         except Exception as e:
-            return f"Error executing command: {e}"
+            execution_time_ms = (time.time() - start_time) * 1000
+            error_msg = f"Error executing command: {e}"
+            if self.logger:
+                self.logger.log_error('EXECUTION_ERROR', error_msg, traceback=str(e))
+            return error_msg
     
     def _read_local_file(self, filepath: str) -> str:
         """Read a file locally"""
@@ -315,15 +399,22 @@ Classification:"""
             return f"Error listing directory: {e}"
     
     def _generate_local_response(self, request: str) -> str:
-        """Generate a response using the local LLM"""
+        """Generate a response using the local LLM with model-specific optimization"""
         model = self.config.config['jeeves']['default_model']
         timeout = self.config.config['jeeves']['timeout_seconds']
         
-        prompt = f"""You are Jeeves, a helpful assistant. Respond to the user's request concisely.
+        # Get model-specific prompt and parameters
+        if HAS_MODEL_CONFIGS:
+            prompt = format_response_prompt(model, request)
+            params = get_response_params(model)
+        else:
+            # Fallback to generic prompt
+            prompt = f"""You are Jeeves, a helpful assistant. Respond to the user's request concisely.
 
 User: {request}
 
 Jeeves:"""
+            params = {"temperature": 0.7}
 
         try:
             response = requests.post(
@@ -332,7 +423,7 @@ Jeeves:"""
                     "model": model,
                     "prompt": prompt,
                     "stream": False,
-                    "options": {"temperature": 0.7}
+                    "options": params
                 },
                 timeout=timeout
             )
@@ -340,12 +431,42 @@ Jeeves:"""
             if response.status_code == 200:
                 return response.json().get('response', '')
             else:
-                return f"Error: Local LLM returned HTTP {response.status_code}"
+                error_msg = f"Error: Local LLM returned HTTP {response.status_code}"
+                if self.logger:
+                    self.logger.log_error('LLM_ERROR', error_msg)
+                return error_msg
                 
         except requests.Timeout:
-            return "Error: Local LLM timed out"
+            error_msg = "Error: Local LLM timed out"
+            if self.logger:
+                self.logger.log_error('LLM_ERROR', error_msg)
+            return error_msg
         except Exception as e:
-            return f"Error with local LLM: {e}"
+            error_msg = f"Error with local LLM: {e}"
+            if self.logger:
+                self.logger.log_error('LLM_ERROR', error_msg, traceback=str(e))
+            return error_msg
+    
+    def _print_routing_message(self, destination: str, method: str, reason: str = ""):
+        """Print fine-tuned messaging about routing decisions"""
+        if destination == 'local':
+            if method == 'pattern_match':
+                print("✅ Jeeves: Handled instantly with pattern matching")
+            elif method == 'llm_classification':
+                print("✅ Jeeves: Local LLM handled this request")
+            else:
+                print("✅ Jeeves: Processed locally")
+        else:  # cloud
+            if method == 'fallback_uncertainty':
+                print("🤔 Jeeves: Local LLM was uncertain → Escalating to primary AI")
+                print(f"   Reason: {reason}")
+            elif method == 'fallback_incomplete':
+                print("📊 Jeeves: Local response incomplete → Escalating for better results")
+            elif method == 'llm_classification':
+                print("🧠 Jeeves: Complex request detected → Routing to primary AI")
+                print("   This requires deeper reasoning than the local model can provide.")
+            else:
+                print("☁️  Jeeves: Routing to primary AI for best results")
     
     def route(self, request: str) -> Dict[str, Any]:
         """
@@ -358,108 +479,191 @@ Jeeves:"""
         - should_escalate: whether to send to Kimi
         """
         
-        # Step 1: Pattern matching (fastest)
-        if self._matches_shell_pattern(request):
-            print("🎯 Jeeves: Recognized shell command")
-            result = self._execute_local_shell(request)
-            return {
-                'destination': 'local',
-                'method': 'pattern_match',
-                'result': result,
-                'should_escalate': False
-            }
+        # Start logging session if enabled
+        if self.logger:
+            self.logger.start_session(request)
+            self.logger.log_system_context({
+                "jeeves_version": "0.1.0",
+                "default_model": self.config.config['jeeves']['default_model'],
+                "pattern_matching": self.config.config['routing']['use_pattern_matching'],
+                "local_llm": self.config.config['routing']['use_local_llm'],
+                "auto_fallback": self.config.config['routing']['auto_fallback']
+            })
         
-        # Step 2: File operation patterns
-        file_match = self._matches_file_pattern(request)
-        if file_match:
-            action, groups = file_match
-            print(f"🎯 Jeeves: Recognized file operation ({action})")
-            
-            if action == 'read_file':
-                result = self._read_local_file(groups[0])
-            elif action == 'list_dir':
-                result = self._list_local_directory(groups[0])
-            else:
-                result = f"File operation '{action}' not yet implemented"
-            
-            return {
-                'destination': 'local',
-                'method': 'pattern_match',
-                'result': result,
-                'should_escalate': False
-            }
-        
-        # Step 3: Local LLM classification
-        if self.config.config['routing']['use_local_llm']:
-            print("🤔 Jeeves: Classifying request...")
-            classification = self._classify_with_local_llm(request)
-            
-            category = classification.get('classification', 'UNCERTAIN')
-            confidence = classification.get('confidence', 0)
-            
-            print(f"   Classification: {category} (confidence: {confidence:.2f})")
-            
-            # Handle based on classification
-            if category == 'SIMPLE' and confidence >= 0.7:
-                # Try to handle locally
-                result = self._generate_local_response(request)
+        try:
+            # Step 1: Pattern matching (fastest)
+            if self._matches_shell_pattern(request):
+                print("🎯 Jeeves: Recognized shell command")
+                result = self._execute_local_shell(request)
+                self._print_routing_message('local', 'pattern_match')
                 
-                # Check if response indicates uncertainty
-                if self.config.config['routing']['auto_fallback'] and self._is_uncertain_response(result):
-                    print("⚠️  Jeeves: Uncertain about response, escalating to Kimi")
-                    return {
-                        'destination': 'cloud',
-                        'method': 'fallback_uncertainty',
-                        'classification': classification,
-                        'should_escalate': True
-                    }
-                
-                return {
+                result_dict = {
                     'destination': 'local',
-                    'method': 'llm_classification',
-                    'classification': classification,
+                    'method': 'pattern_match',
                     'result': result,
                     'should_escalate': False
                 }
+                
+                if self.logger:
+                    self.logger.end_session(result, 'LOCAL')
+                
+                return result_dict
             
-            elif category == 'MODERATE' and confidence >= 0.8:
-                # Try local first, but be ready to escalate
-                result = self._generate_local_response(request)
+            # Step 2: File operation patterns
+            file_match = self._matches_file_pattern(request)
+            if file_match:
+                action, groups = file_match
+                print(f"🎯 Jeeves: Recognized file operation ({action})")
                 
-                if len(result) < 50 or self._is_uncertain_response(result):
-                    print("⚠️  Jeeves: Response seems incomplete, escalating to Kimi")
-                    return {
-                        'destination': 'cloud',
-                        'method': 'fallback_incomplete',
-                        'classification': classification,
-                        'should_escalate': True
-                    }
+                if action == 'read_file':
+                    result = self._read_local_file(groups[0])
+                elif action == 'list_dir':
+                    result = self._list_local_directory(groups[0])
+                else:
+                    result = f"File operation '{action}' not yet implemented"
                 
-                return {
+                self._print_routing_message('local', 'pattern_match')
+                
+                result_dict = {
                     'destination': 'local',
-                    'method': 'llm_classification',
-                    'classification': classification,
+                    'method': 'pattern_match',
                     'result': result,
                     'should_escalate': False
                 }
+                
+                if self.logger:
+                    self.logger.end_session(result, 'LOCAL')
+                
+                return result_dict
             
-            else:
-                # COMPLEX or UNCERTAIN - go to cloud
-                print("☁️  Jeeves: Routing to Kimi for best results")
-                return {
-                    'destination': 'cloud',
-                    'method': 'llm_classification',
-                    'classification': classification,
-                    'should_escalate': True
-                }
-        
-        # Default: escalate to cloud
-        print("☁️  Jeeves: Routing to Kimi")
-        return {
-            'destination': 'cloud',
-            'method': 'default',
-            'should_escalate': True
-        }
+            # Step 3: Local LLM classification
+            if self.config.config['routing']['use_local_llm']:
+                print("🤔 Jeeves: Analyzing request complexity...")
+                classification = self._classify_with_local_llm(request)
+                
+                category = classification.get('classification', 'UNCERTAIN')
+                confidence = classification.get('confidence', 0)
+                
+                # Get model-specific confidence thresholds
+                if HAS_MODEL_CONFIGS:
+                    model = self.config.config['jeeves']['default_model']
+                    thresholds = get_confidence_thresholds(model)
+                    simple_threshold = thresholds['simple']
+                    moderate_threshold = thresholds['moderate']
+                else:
+                    simple_threshold = 0.7
+                    moderate_threshold = 0.8
+                
+                print(f"   Analysis: {category} (confidence: {confidence:.0%})")
+                
+                # Handle based on classification with model-specific thresholds
+                if category == 'SIMPLE' and confidence >= simple_threshold:
+                    # Try to handle locally
+                    result = self._generate_local_response(request)
+                    
+                    # Check if response indicates uncertainty
+                    if self.config.config['routing']['auto_fallback'] and self._is_uncertain_response(result):
+                        self._print_routing_message('cloud', 'fallback_uncertainty', 
+                                                    "Local LLM expressed uncertainty")
+                        
+                        result_dict = {
+                            'destination': 'cloud',
+                            'method': 'fallback_uncertainty',
+                            'classification': classification,
+                            'should_escalate': True
+                        }
+                        
+                        if self.logger:
+                            self.logger.end_session("[ESCALATED - Uncertainty]", 'ESCALATED')
+                        
+                        return result_dict
+                    
+                    self._print_routing_message('local', 'llm_classification')
+                    
+                    result_dict = {
+                        'destination': 'local',
+                        'method': 'llm_classification',
+                        'classification': classification,
+                        'result': result,
+                        'should_escalate': False
+                    }
+                    
+                    if self.logger:
+                        self.logger.end_session(result, 'LOCAL')
+                    
+                    return result_dict
+                
+                elif category == 'MODERATE' and confidence >= moderate_threshold:
+                    # Try local first, but be ready to escalate
+                    result = self._generate_local_response(request)
+                    
+                    if len(result) < 50 or self._is_uncertain_response(result):
+                        self._print_routing_message('cloud', 'fallback_incomplete',
+                                                    "Response too brief or uncertain")
+                        
+                        result_dict = {
+                            'destination': 'cloud',
+                            'method': 'fallback_incomplete',
+                            'classification': classification,
+                            'should_escalate': True
+                        }
+                        
+                        if self.logger:
+                            self.logger.end_session("[ESCALATED - Incomplete]", 'ESCALATED')
+                        
+                        return result_dict
+                    
+                    self._print_routing_message('local', 'llm_classification')
+                    
+                    result_dict = {
+                        'destination': 'local',
+                        'method': 'llm_classification',
+                        'classification': classification,
+                        'result': result,
+                        'should_escalate': False
+                    }
+                    
+                    if self.logger:
+                        self.logger.end_session(result, 'LOCAL')
+                    
+                    return result_dict
+                
+                else:
+                    # COMPLEX or UNCERTAIN - go to cloud
+                    reason = "Complex reasoning required" if category == 'COMPLEX' else "Uncertain classification"
+                    self._print_routing_message('cloud', 'llm_classification', reason)
+                    
+                    result_dict = {
+                        'destination': 'cloud',
+                        'method': 'llm_classification',
+                        'classification': classification,
+                        'should_escalate': True
+                    }
+                    
+                    if self.logger:
+                        self.logger.end_session(f"[ESCALATED - {category}]", 'ESCALATED')
+                    
+                    return result_dict
+            
+            # Default: escalate to cloud
+            self._print_routing_message('cloud', 'default', 'Default routing to primary AI')
+            
+            result_dict = {
+                'destination': 'cloud',
+                'method': 'default',
+                'should_escalate': True
+            }
+            
+            if self.logger:
+                self.logger.end_session("[ESCALATED - Default]", 'ESCALATED')
+            
+            return result_dict
+            
+        except Exception as e:
+            if self.logger:
+                self.logger.log_error('ROUTING_ERROR', str(e))
+                self.logger.end_session(f"[ERROR: {e}]", 'ERROR')
+            raise
     
     def handle(self, request: str) -> str:
         """
@@ -502,8 +706,8 @@ def main():
                     result = router.route(request)
                     
                     if result['should_escalate']:
-                        print(f"🤖 Jeeves → Kimi: {result['method']}")
-                        print("   [Would be sent to Kimi]")
+                        print(f"🤖 Jeeves → Primary AI: {result['method']}")
+                        print("   [Request escalated to primary AI]")
                     else:
                         print(f"🤖 Jeeves: {result['method']}")
                         print(f"\n{result.get('result', 'No result')}")
@@ -531,7 +735,7 @@ def main():
             print(f"Routing: {result['destination']} ({result['method']})")
             
             if result['should_escalate']:
-                print("\n[Request would be sent to Kimi]")
+                print("\n[Request would be sent to primary AI]")
             else:
                 print(f"\n{result.get('result', 'No result')}")
                 

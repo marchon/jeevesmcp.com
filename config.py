@@ -32,6 +32,11 @@ DEFAULT_CONFIG = {
         "auto_fallback": True,
         "cloud_on_uncertainty": True,
     },
+    "logging": {
+        "enabled": False,  # LLM interaction logging (default: off)
+        "log_dir": None,   # None = use default platform-specific path
+        "max_log_files": 100,  # Maximum number of log files to keep
+    },
     "installed_models": [],
     "last_setup": None,
 }
@@ -190,6 +195,8 @@ class JeevesConfig:
                             elif 'completed' in data and 'total' in data:
                                 pct = (data['completed'] / data['total']) * 100
                                 print(f"\r  Progress: {pct:.1f}%", end='', flush=True)
+                    except json.JSONDecodeError:
+                        pass  # Skip lines that aren't valid JSON
             
             print(f"\n✅ Successfully installed {model_name}")
             self.get_installed_models()  # Refresh list
@@ -269,22 +276,71 @@ def print_model_table(models: List[Dict], installed: List[str]):
 
 
 def interactive_setup(config: JeevesConfig):
-    """Run interactive setup wizard"""
+    """Run interactive setup wizard with LLM selection and auto-installation"""
     print_header("🎩 Jeeves Setup Wizard")
-    print("Your intelligent assistant that knows when to ask for help.\n")
+    print("Your intelligent assistant that knows when to ask for help.")
+    print("\n💡 This wizard will:")
+    print("   1. Check and optionally install Ollama")
+    print("   2. Help you choose the best local LLM for your needs")
+    print("   3. Configure routing preferences")
+    print("   4. Set up optional logging for debugging\n")
     
     # Step 1: Check Ollama installation
     print("📋 Step 1: Checking Ollama installation...")
     
     if not config.is_ollama_installed():
-        print("\n❌ Ollama is not installed.")
-        print("\nTo install Ollama:")
-        print("  macOS/Linux: curl -fsSL https://ollama.com/install.sh | sh")
-        print("  Windows: Download from https://ollama.com/download")
-        print("\nPlease install Ollama and run setup again.")
-        return False
-    
-    print("✅ Ollama is installed")
+        print("\n⚠️  Ollama is not installed.")
+        print("\nOllama is required for Jeeves to function.")
+        install = input("Would you like to install Ollama automatically? [Y/n]: ").strip().lower()
+        
+        if install in ('', 'y', 'yes'):
+            print("\n🚀 Installing Ollama...")
+            print("   This may take a few minutes depending on your connection.\n")
+            
+            try:
+                import subprocess
+                import platform as plat
+                
+                system = plat.system()
+                if system == 'Darwin' or system == 'Linux':
+                    result = subprocess.run(
+                        ['curl', '-fsSL', 'https://ollama.com/install.sh'],
+                        capture_output=True,
+                        text=True
+                    )
+                    if result.returncode == 0:
+                        install_result = subprocess.run(
+                            ['sh'],
+                            input=result.stdout,
+                            capture_output=True,
+                            text=True
+                        )
+                        if install_result.returncode == 0:
+                            print("✅ Ollama installed successfully!")
+                        else:
+                            print("❌ Ollama installation failed")
+                            print("Please install manually: https://ollama.com/download")
+                            return False
+                    else:
+                        print("❌ Failed to download Ollama installer")
+                        return False
+                else:
+                    print("\n❌ Automatic installation not available for Windows")
+                    print("Please download and install from: https://ollama.com/download")
+                    return False
+                    
+            except Exception as e:
+                print(f"❌ Installation error: {e}")
+                print("Please install Ollama manually:")
+                print("  macOS/Linux: curl -fsSL https://ollama.com/install.sh | sh")
+                return False
+        else:
+            print("\nOllama is required. Please install it manually:")
+            print("  macOS/Linux: curl -fsSL https://ollama.com/install.sh | sh")
+            print("  Windows: https://ollama.com/download")
+            return False
+    else:
+        print("✅ Ollama is installed")
     
     # Step 2: Check if Ollama is running
     print("\n📋 Step 2: Checking Ollama server status...")
@@ -382,6 +438,30 @@ def interactive_setup(config: JeevesConfig):
         timeout = input("Enter timeout in seconds: ").strip()
         if timeout.isdigit():
             config.config['jeeves']['timeout_seconds'] = int(timeout)
+    
+    # Step 7: Logging configuration
+    print_header("📝 Step 7: LLM Interaction Logging (optional)")
+    
+    print("Jeeves can log all LLM interactions for debugging:")
+    print("  - User commands")
+    print("  - LLM decision prompts and responses")
+    print("  - Escalations to primary AI")
+    print("  - Execution results")
+    print(f"\n  Log format: LLM-LOG-MM:DD:YY:mm:ss:ms.log")
+    print("  Default: DISABLED (recommended for privacy)\n")
+    
+    enable_logging = input("Enable LLM interaction logging? [y/N]: ").strip().lower()
+    if 'logging' not in config.config:
+        config.config['logging'] = {'enabled': False}
+    config.config['logging']['enabled'] = enable_logging in ('y', 'yes')
+    
+    if config.config['logging']['enabled']:
+        print("\n⚠️  Logging is ENABLED")
+        print("   Logs will be saved to the platform-specific logs directory")
+        print("   Use 'jeeves logging off' to disable at any time")
+    else:
+        print("\n✅ Logging is DISABLED (default)")
+        print("   Use 'jeeves logging on' to enable if needed for debugging")
     
     # Save configuration
     config.config['last_setup'] = time.strftime("%Y-%m-%d %H:%M:%S")

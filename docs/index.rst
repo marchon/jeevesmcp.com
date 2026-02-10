@@ -468,9 +468,11 @@ Getting Help
 
    installation
    quickstart
-   configuration
+   platforms
+   logging
    api
    faq
+   development
 
 Indices and tables
 ==================

@@ -40,3 +40,23 @@ Thumbs.db
 # Jeeves specific
 *.log
 .test/
+
+# Test artifacts
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage_html/
+.tox/
+.nox/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Sphinx documentation build
+docs/_build/

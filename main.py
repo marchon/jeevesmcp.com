@@ -13,6 +13,13 @@ sys.path.insert(0, str(Path(__file__).parent))
 from router import JeevesRouter
 from config import JeevesConfig, interactive_setup, switch_model, manage_models
 
+# Try to import logger
+try:
+    from llm_logger import LLMLogger, get_logger
+    HAS_LOGGER = True
+except ImportError:
+    HAS_LOGGER = False
+
 
 def print_banner():
     print("""
@@ -35,6 +42,17 @@ def cmd_status(args):
     print("  🎩 Jeeves Status")
     print("="*50 + "\n")
     
+    # Platform info if available
+    try:
+        from platform_utils import PlatformInfo
+        platform_info = PlatformInfo()
+        print(f"Platform:          {platform_info.get_os_display_name()}")
+        print(f"Shell:             {platform_info.shell.value}")
+        print(f"Terminal:          {platform_info.terminal.value}")
+        print()
+    except ImportError:
+        pass
+    
     print(f"Config file:       {config.CONFIG_FILE}")
     print(f"Ollama installed:  {'✅ Yes' if config.is_ollama_installed() else '❌ No'}")
     print(f"Ollama running:    {'✅ Yes' if config.is_ollama_running() else '❌ No'}")
@@ -45,6 +63,18 @@ def cmd_status(args):
     print(f"  Pattern matching:   {'✅ On' if config.config['routing']['use_pattern_matching'] else '❌ Off'}")
     print(f"  Local LLM:          {'✅ On' if config.config['routing']['use_local_llm'] else '❌ Off'}")
     print(f"  Auto-fallback:      {'✅ On' if config.config['routing']['auto_fallback'] else '❌ Off'}")
+    
+    # Logging status
+    logging_enabled = config.config.get('logging', {}).get('enabled', False)
+    print(f"\nLogging settings:")
+    print(f"  LLM interaction logging: {'✅ On' if logging_enabled else '❌ Off'}")
+    
+    if HAS_LOGGER and logging_enabled:
+        logger = get_logger(config.config)
+        status = logger.get_log_status()
+        print(f"  Log directory:     {status['log_directory']}")
+        print(f"  Log files:         {status['log_count']}")
+    
     print()
 
 
@@ -75,7 +105,7 @@ def cmd_route(args):
         print(f"\nRouting: {result['destination']} ({result['method']})")
         
         if result['should_escalate']:
-            print("\n☁️  Request would be sent to Kimi (cloud)")
+            print("\n☁️  Request would be sent to primary AI (cloud)")
         else:
             print("\n🤖 Local response:")
             print("-" * 50)
@@ -91,21 +121,47 @@ def cmd_interactive(args):
     try:
         router = JeevesRouter()
         print_banner()
-        print("Interactive Mode - Type 'exit' or 'quit' to exit\n")
+        print("Interactive Mode - Type 'exit' or 'quit' to exit")
+        print("Type '/logging on' or '/logging off' to toggle logging\n")
         
         while True:
             try:
                 request = input("You: ").strip()
+                
+                # Handle special commands
                 if request.lower() in ('exit', 'quit'):
                     break
                 if not request:
                     continue
                 
+                # Handle logging toggle in interactive mode
+                if request.lower() == '/logging on':
+                    if HAS_LOGGER:
+                        logger = get_logger(router.config.config)
+                        logger.enable_logging()
+                        router.config.config['logging']['enabled'] = True
+                        router.config.save_config()
+                        router.logger = logger
+                    else:
+                        print("❌ Logging module not available")
+                    continue
+                
+                if request.lower() == '/logging off':
+                    if HAS_LOGGER:
+                        logger = get_logger(router.config.config)
+                        logger.disable_logging()
+                        router.config.config['logging']['enabled'] = False
+                        router.config.save_config()
+                        router.logger = None
+                    else:
+                        print("❌ Logging module not available")
+                    continue
+                
                 result = router.route(request)
                 
                 if result['should_escalate']:
-                    print(f"🤖 Jeeves → ☁️  Kimi ({result['method']})")
-                    print("   [Would be sent to Kimi for processing]")
+                    print(f"🤖 Jeeves → ☁️  Primary AI ({result['method']})")
+                    print("   [Request escalated to primary AI for processing]")
                 else:
                     print(f"🤖 Jeeves ({result['method']})")
                     print(f"\n{result.get('result', 'No result')}")
@@ -123,6 +179,76 @@ def cmd_interactive(args):
         sys.exit(1)
 
 
+def cmd_logging(args):
+    """Control LLM interaction logging"""
+    if not HAS_LOGGER:
+        print("❌ Logging module not available")
+        sys.exit(1)
+    
+    config = JeevesConfig()
+    logger = get_logger(config.config)
+    
+    if args.logging_command == 'on':
+        logger.enable_logging()
+        config.config['logging']['enabled'] = True
+        config.save_config()
+        print("\n💡 Tip: Each request will now be logged to:")
+        print(f"   {logger.log_dir}")
+        print("\n   Log format: LLM-LOG-MM:DD:YY:mm:ss:ms.log")
+        print("   Contains: User command → System context → LLM prompts → Responses")
+        
+    elif args.logging_command == 'off':
+        logger.disable_logging()
+        config.config['logging']['enabled'] = False
+        config.save_config()
+        
+    elif args.logging_command == 'status':
+        status = logger.get_log_status()
+        print("\n" + "="*50)
+        print("  📝 LLM Logging Status")
+        print("="*50 + "\n")
+        print(f"Enabled:          {'✅ Yes' if status['enabled'] else '❌ No'}")
+        print(f"Log directory:    {status['log_directory']}")
+        print(f"Total log files:  {status['log_count']}")
+        if status['current_session']:
+            print(f"Current session:  {status['current_session']}")
+        print()
+        
+    elif args.logging_command == 'list':
+        logs = logger.list_logs(limit=args.limit)
+        print(f"\n📁 Recent log files (showing {min(len(logs), args.limit)} of {logger.get_log_status()['log_count']}):")
+        print("-" * 60)
+        for i, log_path in enumerate(logs, 1):
+            log_name = Path(log_path).name
+            size = Path(log_path).stat().st_size
+            print(f"{i:2}. {log_name} ({size:,} bytes)")
+        print()
+        
+    elif args.logging_command == 'view':
+        if not args.log_file:
+            print("❌ Error: Please specify a log file with --file")
+            sys.exit(1)
+        
+        log_data = logger.read_log(args.log_file)
+        if log_data:
+            print("\n" + "="*60)
+            print(f"  📄 Log: {args.log_file}")
+            print("="*60 + "\n")
+            print(json.dumps(log_data, indent=2))
+            print()
+        else:
+            print(f"❌ Log file not found: {args.log_file}")
+            sys.exit(1)
+            
+    elif args.logging_command == 'clear':
+        deleted = logger.clear_logs(keep_recent=args.keep)
+        print(f"\n🗑️  Cleared {deleted} old log files")
+        print(f"   Kept {args.keep} most recent logs")
+        remaining = logger.get_log_status()['log_count']
+        print(f"   {remaining} log files remaining")
+        print()
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="🎩 Jeeves - Intelligent Local/Cloud Router",
@@ -135,6 +261,12 @@ Examples:
   jeeves switch                   # Switch default model
   jeeves route "ls -la"          # Route a single request
   jeeves interactive              # Start interactive mode
+  jeeves logging on               # Enable LLM interaction logging
+  jeeves logging off              # Disable LLM interaction logging
+  jeeves logging status           # Show logging status
+  jeeves logging list             # List recent log files
+  jeeves logging view --file FILE # View a specific log
+  jeeves logging clear            # Clear old logs (keep 10 recent)
         """
     )
     
@@ -164,6 +296,18 @@ Examples:
     # Interactive
     interactive_parser = subparsers.add_parser('interactive', help='Interactive mode')
     interactive_parser.set_defaults(func=cmd_interactive)
+    
+    # Logging
+    logging_parser = subparsers.add_parser('logging', help='Control LLM interaction logging')
+    logging_parser.add_argument(
+        'logging_command',
+        choices=['on', 'off', 'status', 'list', 'view', 'clear'],
+        help='Logging command'
+    )
+    logging_parser.add_argument('--limit', type=int, default=20, help='Number of logs to list (default: 20)')
+    logging_parser.add_argument('--file', dest='log_file', help='Log file to view')
+    logging_parser.add_argument('--keep', type=int, default=10, help='Number of recent logs to keep when clearing')
+    logging_parser.set_defaults(func=cmd_logging)
     
     args = parser.parse_args()
     
