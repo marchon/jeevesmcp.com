@@ -437,6 +437,83 @@ def cmd_logging(args):
         print()
 
 
+def cmd_compliance(args):
+    """Handle compliance logging commands"""
+    try:
+        from compliance_logger import ComplianceLogger, ComplianceLevel
+    except ImportError:
+        print("❌ Compliance logger not available")
+        sys.exit(1)
+    
+    if args.compliance_command == 'enable':
+        # Enable government compliance logging
+        os.environ['JEEVES_COMPLIANCE_MODE'] = 'government'
+        logger = ComplianceLogger(ComplianceLevel.GOVERNMENT)
+        print("✅ Government compliance logging enabled")
+        print(f"   Audit chain: {logger.chain_file}")
+        print(f"   Session ID: {logger.session_id}")
+        print("\n   All commands will now be logged with:")
+        print("   - Immutable hash chaining")
+        print("   - User and session tracking")
+        print("   - Complete request/response capture")
+        print("   - Processing step details")
+        
+    elif args.compliance_command == 'status':
+        logger = ComplianceLogger()
+        stats = logger.get_statistics()
+        print("\n" + "="*60)
+        print("  🔒 Government Compliance Status")
+        print("="*60 + "\n")
+        print(f"Compliance Level: {stats['compliance_level']}")
+        print(f"Total Entries:    {stats['total_entries']}")
+        print(f"Total Size:       {stats['total_size_bytes']:,} bytes")
+        print(f"Session ID:       {stats['session_id']}")
+        if stats['date_range']['earliest']:
+            print(f"Date Range:       {stats['date_range']['earliest'][:10]} to {stats['date_range']['latest'][:10]}")
+        print()
+        
+    elif args.compliance_command == 'verify':
+        logger = ComplianceLogger()
+        result = logger.verify_chain_integrity(args.date)
+        print("\n" + "="*60)
+        print("  🔍 Audit Chain Verification")
+        print("="*60 + "\n")
+        if result['valid']:
+            print(f"✅ Chain integrity verified")
+            print(f"   Entries checked: {result['entries_checked']}")
+            print(f"   Date: {result['date']}")
+            print(f"   No tampering detected")
+        else:
+            print(f"❌ Chain integrity violation detected!")
+            print(f"   Entries checked: {result['entries_checked']}")
+            print(f"   Violations: {len(result['violations'])}")
+            for v in result['violations'][:5]:  # Show first 5
+                print(f"   - Line {v['line']}: {v['type']}")
+        print()
+        
+    elif args.compliance_command == 'export':
+        logger = ComplianceLogger()
+        output_file = logger.export_audit_log(
+            start_date=args.start_date,
+            end_date=args.end_date,
+            format=args.format,
+            output_file=args.output
+        )
+        print(f"\n✅ Audit log exported")
+        print(f"   File: {output_file}")
+        print(f"   Format: {args.format}")
+        print()
+        
+    elif args.compliance_command == 'stats':
+        logger = ComplianceLogger()
+        stats = logger.get_statistics()
+        print("\n" + "="*60)
+        print("  📊 Compliance Statistics")
+        print("="*60 + "\n")
+        print(json.dumps(stats, indent=2))
+        print()
+
+
 def cmd_server_start(args):
     """Start the WebSocket server"""
     import subprocess
@@ -545,6 +622,13 @@ Examples:
   jeeves logging view --file FILE # View a specific log
   jeeves logging clear            # Clear old logs (keep 10 recent)
 
+Government Compliance:
+  jeeves compliance enable        # Enable government-grade audit logging
+  jeeves compliance status        # Show compliance status
+  jeeves compliance verify        # Verify audit chain integrity
+  jeeves compliance export        # Export audit log for review
+  jeeves compliance stats         # Show compliance statistics
+  
 Auto-Start:
   On first use, Jeeves automatically:
   - Enables logging
@@ -622,6 +706,20 @@ Auto-Start:
     logging_parser.add_argument('--file', dest='log_file', help='Log file to view')
     logging_parser.add_argument('--keep', type=int, default=10, help='Number of recent logs to keep when clearing')
     logging_parser.set_defaults(func=cmd_logging)
+    
+    # Compliance (Government)
+    compliance_parser = subparsers.add_parser('compliance', help='Government compliance logging')
+    compliance_parser.add_argument(
+        'compliance_command',
+        choices=['enable', 'status', 'verify', 'export', 'stats'],
+        help='Compliance command'
+    )
+    compliance_parser.add_argument('--date', help='Date to verify (YYYYMMDD)')
+    compliance_parser.add_argument('--start-date', help='Export start date (YYYY-MM-DD)')
+    compliance_parser.add_argument('--end-date', help='Export end date (YYYY-MM-DD)')
+    compliance_parser.add_argument('--format', choices=['json', 'csv'], default='json', help='Export format')
+    compliance_parser.add_argument('--output', help='Output file for export')
+    compliance_parser.set_defaults(func=cmd_compliance)
     
     args = parser.parse_args()
     

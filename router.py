@@ -22,6 +22,13 @@ try:
 except ImportError:
     HAS_LOGGER = False
 
+# Try to import compliance logger
+try:
+    from compliance_logger import ComplianceLogger, get_compliance_logger, ComplianceLevel
+    HAS_COMPLIANCE = True
+except ImportError:
+    HAS_COMPLIANCE = False
+
 # Try to import model configs for optimization
 try:
     from model_configs import (
@@ -458,6 +465,18 @@ Jeeves:"""
         - should_escalate: whether to send to Kimi
         """
         
+        import time
+        start_time = time.time()
+        processing_steps = []
+        
+        # Initialize compliance logger if available
+        compliance_logger = None
+        if HAS_COMPLIANCE:
+            try:
+                compliance_logger = get_compliance_logger(ComplianceLevel.GOVERNMENT)
+            except:
+                pass
+        
         # Start logging session if enabled
         if self.logger:
             self.logger.start_session(request)
@@ -469,13 +488,32 @@ Jeeves:"""
                 "auto_fallback": self.config.config['routing']['auto_fallback']
             })
         
+        # Log initial request to compliance
+        if compliance_logger:
+            processing_steps.append(compliance_logger.log_processing_step(
+                'REQUEST_RECEIVED',
+                {'raw_request': request, 'timestamp': time.time()}
+            ))
+        
+        result_dict = None
+        
         try:
             # Get log file if logging is enabled
             log_file = str(self.logger.current_log_file) if self.logger and self.logger.current_log_file else None
             
             # Step 1: Pattern matching (fastest)
             if self._matches_shell_pattern(request):
+                if compliance_logger:
+                    processing_steps.append(compliance_logger.log_processing_step(
+                        'PATTERN_MATCH_SHELL', {'pattern': 'shell', 'request': request}
+                    ))
+                
                 result = self._execute_local_shell(request)
+                
+                if compliance_logger:
+                    processing_steps.append(compliance_logger.log_processing_step(
+                        'SHELL_EXECUTED', {'result_length': len(result)}
+                    ))
                 
                 result_dict = {
                     'destination': 'local',
@@ -487,13 +525,15 @@ Jeeves:"""
                 
                 if self.logger:
                     self.logger.end_session(result, 'LOCAL')
-                
-                return result_dict
             
             # Step 2: File operation patterns
-            file_match = self._matches_file_pattern(request)
-            if file_match:
+            elif file_match := self._matches_file_pattern(request):
                 action, groups = file_match
+                
+                if compliance_logger:
+                    processing_steps.append(compliance_logger.log_processing_step(
+                        'PATTERN_MATCH_FILE', {'action': action, 'args': groups}
+                    ))
                 
                 if action == 'read_file':
                     result = self._read_local_file(groups[0])
@@ -502,6 +542,11 @@ Jeeves:"""
                 else:
                     result = f"File operation '{action}' not yet implemented"
                 
+                if compliance_logger:
+                    processing_steps.append(compliance_logger.log_processing_step(
+                        'FILE_OPERATION_EXECUTED', {'action': action, 'result_length': len(result)}
+                    ))
+                
                 result_dict = {
                     'destination': 'local',
                     'method': 'pattern_match',
@@ -512,15 +557,24 @@ Jeeves:"""
                 
                 if self.logger:
                     self.logger.end_session(result, 'LOCAL')
-                
-                return result_dict
             
             # Step 3: Local LLM classification
-            if self.config.config['routing']['use_local_llm']:
+            elif self.config.config['routing']['use_local_llm']:
+                if compliance_logger:
+                    processing_steps.append(compliance_logger.log_processing_step(
+                        'LLM_CLASSIFICATION_START', {'model': self.config.config['jeeves']['default_model']}
+                    ))
+                
                 classification = self._classify_with_local_llm(request)
                 
                 category = classification.get('classification', 'UNCERTAIN')
                 confidence = classification.get('confidence', 0)
+                
+                if compliance_logger:
+                    processing_steps.append(compliance_logger.log_processing_step(
+                        'LLM_CLASSIFICATION_COMPLETE', 
+                        {'category': category, 'confidence': confidence}
+                    ))
                 
                 # Get model-specific confidence thresholds
                 if HAS_MODEL_CONFIGS:
@@ -535,10 +589,20 @@ Jeeves:"""
                 # Handle based on classification with model-specific thresholds
                 if category == 'SIMPLE' and confidence >= simple_threshold:
                     # Try to handle locally
+                    if compliance_logger:
+                        processing_steps.append(compliance_logger.log_processing_step(
+                            'GENERATING_LOCAL_RESPONSE', {}
+                        ))
+                    
                     result = self._generate_local_response(request)
                     
                     # Check if response indicates uncertainty
                     if self.config.config['routing']['auto_fallback'] and self._is_uncertain_response(result):
+                        if compliance_logger:
+                            processing_steps.append(compliance_logger.log_processing_step(
+                                'UNCERTAINTY_DETECTED', {'escalating': True}
+                            ))
+                        
                         result_dict = {
                             'destination': 'cloud',
                             'method': 'fallback_uncertainty',
@@ -549,28 +613,39 @@ Jeeves:"""
                         
                         if self.logger:
                             self.logger.end_session("[ESCALATED - Uncertainty]", 'ESCALATED')
+                    else:
+                        if compliance_logger:
+                            processing_steps.append(compliance_logger.log_processing_step(
+                                'LOCAL_RESPONSE_GENERATED', {'result_length': len(result)}
+                            ))
                         
-                        return result_dict
-                    
-                    result_dict = {
-                        'destination': 'local',
-                        'method': 'llm_classification',
-                        'classification': classification,
-                        'result': result,
-                        'should_escalate': False,
-                        'log_file': log_file
-                    }
-                    
-                    if self.logger:
-                        self.logger.end_session(result, 'LOCAL')
-                    
-                    return result_dict
+                        result_dict = {
+                            'destination': 'local',
+                            'method': 'llm_classification',
+                            'classification': classification,
+                            'result': result,
+                            'should_escalate': False,
+                            'log_file': log_file
+                        }
+                        
+                        if self.logger:
+                            self.logger.end_session(result, 'LOCAL')
                 
                 elif category == 'MODERATE' and confidence >= moderate_threshold:
                     # Try local first, but be ready to escalate
+                    if compliance_logger:
+                        processing_steps.append(compliance_logger.log_processing_step(
+                            'GENERATING_LOCAL_RESPONSE', {'category': 'MODERATE'}
+                        ))
+                    
                     result = self._generate_local_response(request)
                     
                     if len(result) < 50 or self._is_uncertain_response(result):
+                        if compliance_logger:
+                            processing_steps.append(compliance_logger.log_processing_step(
+                                'RESPONSE_INCOMPLETE', {'escalating': True}
+                            ))
+                        
                         result_dict = {
                             'destination': 'cloud',
                             'method': 'fallback_incomplete',
@@ -581,25 +656,32 @@ Jeeves:"""
                         
                         if self.logger:
                             self.logger.end_session("[ESCALATED - Incomplete]", 'ESCALATED')
+                    else:
+                        if compliance_logger:
+                            processing_steps.append(compliance_logger.log_processing_step(
+                                'LOCAL_RESPONSE_GENERATED', {'result_length': len(result)}
+                            ))
                         
-                        return result_dict
-                    
-                    result_dict = {
-                        'destination': 'local',
-                        'method': 'llm_classification',
-                        'classification': classification,
-                        'result': result,
-                        'should_escalate': False,
-                        'log_file': log_file
-                    }
-                    
-                    if self.logger:
-                        self.logger.end_session(result, 'LOCAL')
-                    
-                    return result_dict
+                        result_dict = {
+                            'destination': 'local',
+                            'method': 'llm_classification',
+                            'classification': classification,
+                            'result': result,
+                            'should_escalate': False,
+                            'log_file': log_file
+                        }
+                        
+                        if self.logger:
+                            self.logger.end_session(result, 'LOCAL')
                 
                 else:
                     # COMPLEX or UNCERTAIN - go to cloud
+                    if compliance_logger:
+                        processing_steps.append(compliance_logger.log_processing_step(
+                            'ESCALATING_TO_CLOUD', 
+                            {'reason': category, 'confidence': confidence}
+                        ))
+                    
                     result_dict = {
                         'destination': 'cloud',
                         'method': 'llm_classification',
@@ -610,19 +692,41 @@ Jeeves:"""
                     
                     if self.logger:
                         self.logger.end_session(f"[ESCALATED - {category}]", 'ESCALATED')
-                    
-                    return result_dict
             
             # Default: escalate to cloud
-            result_dict = {
-                'destination': 'cloud',
-                'method': 'default',
-                'should_escalate': True,
-                'log_file': log_file
-            }
+            else:
+                if compliance_logger:
+                    processing_steps.append(compliance_logger.log_processing_step(
+                        'DEFAULT_ESCALATION', {'reason': 'LLM disabled'}
+                    ))
+                
+                result_dict = {
+                    'destination': 'cloud',
+                    'method': 'default',
+                    'should_escalate': True,
+                    'log_file': log_file
+                }
+                
+                if self.logger:
+                    self.logger.end_session("[ESCALATED - Default]", 'ESCALATED')
             
-            if self.logger:
-                self.logger.end_session("[ESCALATED - Default]", 'ESCALATED')
+            # Final compliance logging
+            if compliance_logger and result_dict:
+                execution_time = (time.time() - start_time) * 1000
+                compliance_logger.log_command(
+                    raw_command=request,
+                    processed_request=request,
+                    processing_steps=processing_steps,
+                    routing_decision=result_dict['method'],
+                    destination=result_dict['destination'],
+                    response=result_dict.get('result', '[ESCALATED]'),
+                    execution_time_ms=execution_time,
+                    additional_metadata={
+                        'log_file': log_file,
+                        'classification': result_dict.get('classification'),
+                        'should_escalate': result_dict['should_escalate']
+                    }
+                )
             
             return result_dict
             
@@ -630,6 +734,24 @@ Jeeves:"""
             if self.logger:
                 self.logger.log_error('ROUTING_ERROR', str(e))
                 self.logger.end_session(f"[ERROR: {e}]", 'ERROR')
+            
+            # Log error to compliance
+            if compliance_logger:
+                processing_steps.append(compliance_logger.log_processing_step(
+                    'ERROR', {'error': str(e), 'error_type': type(e).__name__}
+                ))
+                execution_time = (time.time() - start_time) * 1000
+                compliance_logger.log_command(
+                    raw_command=request,
+                    processed_request=request,
+                    processing_steps=processing_steps,
+                    routing_decision='ERROR',
+                    destination='error',
+                    response=f"[ERROR: {e}]",
+                    execution_time_ms=execution_time,
+                    additional_metadata={'error': str(e)}
+                )
+            
             raise
     
     def handle(self, request: str) -> str:
