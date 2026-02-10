@@ -1,11 +1,11 @@
 #!/bin/bash
 # Jeeves One-Liner Install Script
 # This can be run directly with:
-# curl -fsSL https://raw.githubusercontent.com/marchon/jeevesmcp/main/install.sh | bash
+# curl -fsSL https://raw.githubusercontent.com/marchon/jeevesmcp.com/main/install.sh | bash
 
 set -e
 
-JEEVES_REPO="https://github.com/marchon/jeevesmcp"
+JEEVES_REPO="https://github.com/marchon/jeevesmcp.com"
 INSTALL_DIR="${HOME}/.local/share/jeeves"
 BIN_DIR="${HOME}/.local/bin"
 
