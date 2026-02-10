@@ -1,0 +1,61 @@
+# Caddy configuration for jeevesmcp.com
+# Place this file at /etc/caddy/Caddyfile on your server
+
+jeevesmcp.com {
+    # Enable gzip compression
+    encode gzip
+
+    # Serve the Sphinx documentation from /var/www/jeevesmcp.com
+    root * /var/www/jeevesmcp.com
+
+    # Try files in order: URI, URI/ (for directories), index.html
+    try_files {path} {path}/ /index.html
+
+    # Enable file server
+    file_server {
+        # Hide hidden files
+        hide .git .env .htaccess
+    }
+
+    # Security headers
+    header {
+        # Enable HSTS
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        # Prevent MIME type sniffing
+        X-Content-Type-Options "nosniff"
+        # Enable XSS protection
+        X-Frame-Options "DENY"
+        X-XSS-Protection "1; mode=block"
+        # Content Security Policy
+        Content-Security-Policy "default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; script-src 'self' 'unsafe-inline'; img-src 'self' data: https:;"
+        # Referrer policy
+        Referrer-Policy "strict-origin-when-cross-origin"
+    }
+
+    # Enable compression for text files
+    @text_files {
+        path *.html *.css *.js *.json *.xml *.svg *.txt
+    }
+    encode @text_files gzip zstd
+
+    # Logging
+    log {
+        output file /var/log/caddy/jeevesmcp.com.access.log {
+            roll_size 10MB
+            roll_keep 10
+            roll_keep_for 720h
+        }
+        format json
+    }
+
+    # Handle 404s gracefully
+    handle_errors {
+        rewrite * /{err.status_code}.html
+        file_server
+    }
+}
+
+# Optional: Redirect www to non-www
+www.jeevesmcp.com {
+    redir https://jeevesmcp.com{uri} permanent
+}

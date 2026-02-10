@@ -1,0 +1,91 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'docs/**'
+      - 'Caddyfile'
+      - '.github/workflows/deploy.yml'
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        
+    - name: Install dependencies
+      run: |
+        pip install sphinx furo sphinx-copybutton myst-parser
+        
+    - name: Build documentation
+      run: |
+        cd docs
+        make html
+        
+    - name: Create 404 page
+      run: |
+        cat > docs/_build/html/404.html << 'EOF'
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>404 - Page Not Found | Jeeves</title>
+            <meta charset="utf-8">
+            <style>
+                body {
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                    max-width: 600px;
+                    margin: 100px auto;
+                    padding: 20px;
+                    text-align: center;
+                }
+                .emoji { font-size: 64px; }
+                h1 { color: #333; }
+                p { color: #666; line-height: 1.6; }
+                a { color: #0066cc; text-decoration: none; }
+                a:hover { text-decoration: underline; }
+            </style>
+        </head>
+        <body>
+            <div class="emoji">🎩</div>
+            <h1>404 - Page Not Found</h1>
+            <p>Sorry, the page you're looking for doesn't exist.</p>
+            <p><a href="/">← Back to Jeeves Documentation</a></p>
+        </body>
+        </html>
+        EOF
+        
+    - name: Deploy to server
+      env:
+        SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        SERVER_HOST: ${{ secrets.SERVER_HOST }}
+        SERVER_USER: ${{ secrets.SERVER_USER }}
+      run: |
+        # Install SSH key
+        mkdir -p ~/.ssh
+        echo "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
+        chmod 600 ~/.ssh/deploy_key
+        
+        # Add host to known hosts
+        ssh-keyscan -H "$SERVER_HOST" >> ~/.ssh/known_hosts
+        
+        # Deploy using rsync
+        rsync -avz --delete \
+          -e "ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no" \
+          docs/_build/html/ \
+          "$SERVER_USER@$SERVER_HOST:/var/www/jeevesmcp.com/"
+        
+    - name: Verify deployment
+      env:
+        SERVER_HOST: ${{ secrets.SERVER_HOST }}
+      run: |
+        sleep 5
+        curl -s -o /dev/null -w "%{http_code}" https://$SERVER_HOST | grep "200" && echo "✅ Deployment successful" || echo "⚠️ Verification returned non-200"
