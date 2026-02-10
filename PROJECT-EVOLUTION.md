@@ -2,7 +2,7 @@
 
 **Purpose:** This document tracks all changes made to the Jeeves project for coordination between multiple AI agents and crash recovery.
 
-**Last Updated:** 2026-02-10 13:35 EST
+**Last Updated:** 2026-02-10 13:58 EST
 
 ---
 
@@ -17,27 +17,98 @@
 4. ✅ Response indicators (LOCAL/UPSTREAM with log file tracking)
 5. ✅ Multi-client support (detects existing instances)
 6. ✅ **Government Compliance Logging** - Complete audit trail with hash chaining
+7. ✅ **Blockchain Audit System** - Immutable SHA-256 blockchain with API publishing
 
 **Running Services:**
 - Jeeves WebSocket Server: Running (PID varies)
 - Ollama: Running (connected, not restarted)
 - Default Model: qwen2.5:1.5b (986MB)
 - Compliance Logging: Active (government level)
+- Blockchain Audit: Active (4 blocks, chain integrity verified)
 
 **Files Modified/Created:**
-- `main.py` - CLI with WebSocket client support + compliance commands
+- `main.py` - CLI with WebSocket client support + compliance/blockchain commands
 - `server.py` - WebSocket server with upstream handling
 - `client.py` - Standalone WebSocket client
 - `upstream_pool.py` - LLM connection pool manager
 - `auto_start.py` - Auto-initialization system
 - `compliance_logger.py` - Government-grade audit logging with hash chaining
+- `blockchain_logger.py` - Immutable blockchain audit system with SHA-256
 - `requirements.txt` - Added websockets, aiohttp dependencies
-- `router.py` - Added log_file tracking + compliance hooks
+- `router.py` - Added log_file tracking + compliance/blockchain hooks
 - `PROJECT-EVOLUTION.md` - This file
 
 ---
 
 ## Change History (Newest First)
+
+### Change #010 - Blockchain Audit System
+**Timestamp:** 2026-02-10 13:58 EST
+**Type:** Feature - Immutable Blockchain Audit
+**Status:** ✅ Complete
+
+**What Had to Change:**
+- Need immutable tamper-evident audit trail beyond text logs
+- Need cryptographic proof of log integrity
+- Need external API publishing for compliance verification
+- Need chain verification to detect tampering
+
+**What It Was Changed To:**
+- `blockchain_logger.py` - New module with:
+  - `Block` dataclass: index, timestamp, previous_hash, data, hash, api_receipt
+  - `BlockchainLogger` class managing SHA-256 hashed blockchain
+  - Genesis block creation for new chains
+  - Linked block structure (each block contains hash of previous)
+  - SHA-256 based filenames: `SHA256-{hash[:16]}-{timestamp}.json`
+  - External API publishing with receipt storage
+  - Chain integrity verification with detailed error reporting
+  - CLI commands: `j blockchain status`, `j blockchain verify`, `j blockchain publish`
+
+**How It Was Implemented:**
+- Each command creates a new block with:
+  - Command data, routing decision, response
+  - Previous block hash for chain linking
+  - SHA-256 hash of all block data
+  - Timestamp and metadata (user, hostname, log file)
+- Files stored in `~/.local/share/jeeves/blockchain/`
+- Verification checks:
+  - Index sequence (0, 1, 2, 3...)
+  - Hash chain integrity (each block's previous_hash matches)
+  - Hash recalculation (detect tampering)
+- API publishing:
+  - Configurable via `JEEVES_BLOCKCHAIN_API` env var
+  - POSTs chain state to external endpoint
+  - Stores API receipt in new block
+
+**Files Changed:**
+- `blockchain_logger.py` (NEW - 430 lines)
+- `main.py` - Added `cmd_blockchain()` with status/verify/publish commands
+- `router.py` - Integrated blockchain logging in route() method
+
+**Bug Fixes:**
+- Fixed block loading to sort by index (not alphabetical by hash)
+- Fixed server path resolution when run via symlink (`Path.resolve()`)
+
+**Git Actions:**
+```bash
+git add blockchain_logger.py main.py router.py
+git commit -m "Add blockchain audit system with SHA-256 hashing and API publishing
+
+- blockchain_logger.py: Immutable blockchain for compliance auditing
+- SHA-256 hashed filenames for tamper detection
+- Linked block structure with previous_hash
+- External API publishing with receipt storage
+- CLI: j blockchain status/verify/publish
+- Automatic logging of all commands to blockchain"
+
+git commit -m "Fix blockchain loading to sort by index and server path resolution
+
+- _load_or_create_chain(): Sort loaded blocks by index instead of filename
+- get_chain_files(): Sort files by reading index from each file
+- cmd_server_start(): Use Path.resolve() to follow symlinks"
+```
+
+---
 
 ### Change #009 - Government Compliance Logging
 **Timestamp:** 2026-02-10 13:35 EST
