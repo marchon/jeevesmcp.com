@@ -11,6 +11,7 @@ import json
 import sys
 import os
 import time
+from datetime import datetime
 from typing import Optional, Tuple, Dict, Any
 from pathlib import Path
 from config import JeevesConfig
@@ -28,6 +29,13 @@ try:
     HAS_COMPLIANCE = True
 except ImportError:
     HAS_COMPLIANCE = False
+
+# Try to import blockchain logger
+try:
+    from blockchain_logger import BlockchainLogger, get_blockchain_logger
+    HAS_BLOCKCHAIN = True
+except ImportError:
+    HAS_BLOCKCHAIN = False
 
 # Try to import model configs for optimization
 try:
@@ -728,6 +736,34 @@ Jeeves:"""
                     }
                 )
             
+            # Blockchain logging
+            if HAS_BLOCKCHAIN and result_dict:
+                try:
+                    blockchain_logger = get_blockchain_logger()
+                    execution_time = (time.time() - start_time) * 1000
+                    
+                    block_data = {
+                        "type": "COMMAND_EXECUTION",
+                        "raw_command": request,
+                        "routing_decision": result_dict['method'],
+                        "destination": result_dict['destination'],
+                        "should_escalate": result_dict['should_escalate'],
+                        "response": result_dict.get('result', '[ESCALATED]'),
+                        "execution_time_ms": execution_time,
+                        "log_file": log_file,
+                        "processing_step_count": len(processing_steps),
+                        "timestamp_utc": datetime.utcnow().isoformat() + 'Z',
+                        "user": os.environ.get('USER', 'unknown'),
+                        "hostname": os.environ.get('HOSTNAME', 'unknown')
+                    }
+                    
+                    block = blockchain_logger.add_block(block_data)
+                    result_dict['block_hash'] = block.hash
+                    result_dict['block_index'] = block.index
+                except Exception as e:
+                    # Don't fail the command if blockchain logging fails
+                    pass
+            
             return result_dict
             
         except Exception as e:
@@ -751,6 +787,22 @@ Jeeves:"""
                     execution_time_ms=execution_time,
                     additional_metadata={'error': str(e)}
                 )
+            
+            # Log error to blockchain
+            if HAS_BLOCKCHAIN:
+                try:
+                    blockchain_logger = get_blockchain_logger()
+                    execution_time = (time.time() - start_time) * 1000
+                    blockchain_logger.add_block({
+                        "type": "ERROR",
+                        "raw_command": request,
+                        "error": str(e),
+                        "error_type": type(e).__name__,
+                        "execution_time_ms": execution_time,
+                        "timestamp_utc": datetime.utcnow().isoformat() + 'Z'
+                    })
+                except:
+                    pass
             
             raise
     

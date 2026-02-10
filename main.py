@@ -514,6 +514,111 @@ def cmd_compliance(args):
         print()
 
 
+def cmd_blockchain(args):
+    """Handle blockchain audit commands"""
+    try:
+        from blockchain_logger import BlockchainLogger, get_blockchain_logger
+    except ImportError:
+        print("❌ Blockchain logger not available")
+        sys.exit(1)
+    
+    if args.blockchain_command == 'enable':
+        # Set environment variables if provided
+        if args.api:
+            os.environ['JEEVES_BLOCKCHAIN_API'] = args.api
+        if args.api_key:
+            os.environ['JEEVES_BLOCKCHAIN_API_KEY'] = args.api_key
+        
+        logger = get_blockchain_logger(
+            api_endpoint=args.api,
+            api_key=args.api_key,
+            auto_publish=not args.no_auto_publish
+        )
+        print("🔗 Blockchain audit logging enabled")
+        print(f"   Chain ID: {logger.chain_id}")
+        print(f"   Directory: {logger.chain_dir}")
+        print(f"   Total blocks: {len(logger.chain)}")
+        if logger.api_endpoint:
+            print(f"   API Endpoint: {logger.api_endpoint}")
+            print(f"   Auto-publish: {logger.auto_publish}")
+            print(f"   Publish interval: {logger.publish_interval}s")
+        print("\n   Files are named: SHA256-{hash}-{timestamp}.json")
+        
+    elif args.blockchain_command == 'status':
+        logger = BlockchainLogger()
+        stats = logger.get_statistics()
+        print("\n" + "="*60)
+        print("  🔗 Blockchain Audit Status")
+        print("="*60 + "\n")
+        print(f"Chain ID:         {stats['chain_id']}")
+        print(f"Total Blocks:     {stats['total_blocks']}")
+        print(f"Pending Blocks:   {stats['pending_blocks']}")
+        print(f"Genesis:          {stats['genesis_timestamp'][:19] if stats['genesis_timestamp'] else 'N/A'}")
+        print(f"Latest:           {stats['latest_timestamp'][:19] if stats['latest_timestamp'] else 'N/A'}")
+        print(f"Latest Hash:      {stats['latest_hash'][:32]}..." if stats['latest_hash'] else "N/A")
+        print(f"Total Size:       {stats['total_size_bytes']:,} bytes")
+        print(f"API Endpoint:     {stats['api_endpoint'] or 'Not configured'}")
+        print(f"Auto-publish:     {'Yes' if stats['auto_publish'] else 'No'}")
+        if stats['auto_publish']:
+            print(f"Publish Interval: {stats['publish_interval_seconds']}s")
+        print()
+        
+    elif args.blockchain_command == 'verify':
+        logger = BlockchainLogger()
+        result = logger.verify_chain()
+        print("\n" + "="*60)
+        print("  🔍 Blockchain Verification")
+        print("="*60 + "\n")
+        if result['valid']:
+            print(f"✅ Chain integrity verified")
+            print(f"   Blocks checked: {result['blocks_checked']}")
+            print(f"   Chain ID: {result['chain_id']}")
+            print(f"   No tampering detected")
+        else:
+            print(f"❌ Chain integrity violations detected!")
+            print(f"   Blocks checked: {result['blocks_checked']}")
+            print(f"   Errors: {len(result['errors'])}")
+            for error in result['errors'][:10]:
+                print(f"   - {error}")
+        print()
+        
+    elif args.blockchain_command == 'publish':
+        logger = BlockchainLogger()
+        receipt = logger.publish_to_api(force=True)
+        if receipt:
+            print("\n✅ Published to API")
+            print(f"   Endpoint: {receipt['api_endpoint']}")
+            print(f"   Published at: {receipt['published_at']}")
+            print(f"   Response hash: {receipt['response_hash']}")
+            print(f"   Blocks published: {receipt['blocks_published']}")
+            print()
+        else:
+            print("\n❌ Publish failed or no API configured")
+            print()
+            
+    elif args.blockchain_command == 'export':
+        logger = BlockchainLogger()
+        output_file = logger.export_chain(args.output)
+        print(f"\n✅ Chain exported")
+        print(f"   File: {output_file}")
+        print(f"   Blocks: {len(logger.chain)}")
+        print()
+        
+    elif args.blockchain_command == 'files':
+        logger = BlockchainLogger()
+        files = logger.get_chain_files()
+        print("\n" + "="*60)
+        print("  📁 Blockchain Files")
+        print("="*60 + "\n")
+        print(f"Location: {logger.chain_dir}\n")
+        for i, f in enumerate(files[-20:], 1):  # Show last 20
+            size = f.stat().st_size
+            print(f"{i:3}. {f.name} ({size:,} bytes)")
+        if len(files) > 20:
+            print(f"\n... and {len(files) - 20} more files")
+        print()
+
+
 def cmd_server_start(args):
     """Start the WebSocket server"""
     import subprocess
@@ -526,7 +631,8 @@ def cmd_server_start(args):
     print(f"🚀 Starting Jeeves WebSocket Server on port {DEFAULT_WS_PORT}...")
     
     # Start server in background
-    server_script = Path(__file__).parent / "server.py"
+    # Use resolve() to follow symlinks and find the actual installation directory
+    server_script = Path(__file__).resolve().parent / "server.py"
     process = subprocess.Popen(
         [sys.executable, str(server_script), "start"],
         stdout=subprocess.PIPE,
@@ -621,6 +727,14 @@ Examples:
   jeeves logging list             # List recent log files
   jeeves logging view --file FILE # View a specific log
   jeeves logging clear            # Clear old logs (keep 10 recent)
+
+Blockchain Audit:
+  jeeves blockchain enable        # Enable blockchain logging
+  jeeves blockchain status        # Show blockchain status
+  jeeves blockchain verify        # Verify chain integrity
+  jeeves blockchain publish       # Publish to API now
+  jeeves blockchain export        # Export chain to file
+  jeeves blockchain files         # List blockchain files
 
 Government Compliance:
   jeeves compliance enable        # Enable government-grade audit logging
@@ -720,6 +834,19 @@ Auto-Start:
     compliance_parser.add_argument('--format', choices=['json', 'csv'], default='json', help='Export format')
     compliance_parser.add_argument('--output', help='Output file for export')
     compliance_parser.set_defaults(func=cmd_compliance)
+    
+    # Blockchain
+    blockchain_parser = subparsers.add_parser('blockchain', help='Blockchain audit logging')
+    blockchain_parser.add_argument(
+        'blockchain_command',
+        choices=['enable', 'status', 'verify', 'publish', 'export', 'files'],
+        help='Blockchain command'
+    )
+    blockchain_parser.add_argument('--api', help='External API endpoint for publishing')
+    blockchain_parser.add_argument('--api-key', help='API key for authentication')
+    blockchain_parser.add_argument('--no-auto-publish', action='store_true', help='Disable auto-publishing')
+    blockchain_parser.add_argument('--output', help='Output file for export')
+    blockchain_parser.set_defaults(func=cmd_blockchain)
     
     args = parser.parse_args()
     
